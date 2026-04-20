@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlparse
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
@@ -14,11 +15,26 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
+def _resolve_webapp_url(base_url: str) -> str | None:
+    """Возвращает URL Mini App только если он валидный и HTTPS."""
+    if not base_url:
+        return None
+
+    normalized = base_url.strip().rstrip("/")
+    parsed = urlparse(normalized)
+    if parsed.scheme != "https" or not parsed.netloc:
+        logger.warning(
+            "PUBLIC_BASE_URL is not valid HTTPS URL: %r. Mini App button disabled.",
+            base_url,
+        )
+        return None
+    return f"{normalized}/"
+
+
 @router.message(Command("start", "help"))
 async def cmd_start(message: Message) -> None:
-    base = config.PUBLIC_BASE_URL
-    if base:
-        url = f"{base}/"
+    url = _resolve_webapp_url(config.PUBLIC_BASE_URL)
+    if url:
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [
