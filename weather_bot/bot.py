@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+import logging
+
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
+
+from weather_bot import config
+
+logger = logging.getLogger(__name__)
+
+router = Router()
+
+
+@router.message(Command("start", "help"))
+async def cmd_start(message: Message) -> None:
+    base = config.PUBLIC_BASE_URL
+    if base:
+        url = f"{base}/"
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [
+                    KeyboardButton(
+                        text="Прогноз на 5 дней",
+                        web_app=WebAppInfo(url=url),
+                    )
+                ]
+            ],
+            resize_keyboard=True,
+        )
+        await message.answer(
+            "Привет! Нажми кнопку ниже — откроется приложение с прогнозом погоды.\n"
+            "Введи город и нажми «Показать прогноз».\n\n"
+            "Также можно написать город в чат: например `Москва` или `London`.",
+            reply_markup=kb,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        await message.answer(
+            "Привет! Напиши в чат название города — например `Москва` или `London`.\n\n"
+            "Кнопка Mini App появится, если в .env задать `PUBLIC_BASE_URL` — см. комментарий там.",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+
+@router.message(F.text)
+async def city_text(message: Message) -> None:
+    text = (message.text or "").strip()
+    if not text or text.startswith("/"):
+        return
+
+    if not config.OPENWEATHER_API_KEY:
+        await message.answer("На сервере не задан OPENWEATHER_API_KEY.")
+        return
+
+    from weather_bot.weather_service import fetch_forecast
+
+    try:
+        data = await fetch_forecast(config.OPENWEATHER_API_KEY, text)
+    except ValueError as e:
+        await message.answer(str(e))
+        return
+    except Exception:
+        logger.exception("forecast failed")
+        await message.answer("Не удалось получить прогноз. Попробуйте позже.")
+        return
+
+    loc = data["location"]
+    lines = [f"*{loc}*", ""]
+    for d in data.get("daily", [])[:5]:
+        lines.append(
+            f"*{d['label']}*: {d['temp_min']}…{d['temp_max']} °C, "
+            f"{d['description']}, ветер до {d['wind_max_ms']} м/с, "
+            f"осадки до {d['precipitation_prob_max']}%"
+        )
+    await message.answer("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+def build_dispatcher() -> Dispatcher:
+    if not config.TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("Задайте TELEGRAM_BOT_TOKEN")
+    dp = Dispatcher()
+    dp.include_router(router)
+    return dp
+
+
+async def run_polling() -> None:
+    """Запуск long polling (вызывать из asyncio-задачи рядом с uvicorn)."""
+    bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
+    dp = build_dispatcher()
+    await dp.start_polling(bot, drop_pending_updates=True)

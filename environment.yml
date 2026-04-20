@@ -1,0 +1,14 @@
+# Все команды ниже — из корня репозитория (каталог с этим файлом и main.py):
+#   conda env create -f environment.yml && conda activate weather-bot
+name: weather-bot
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - aiogram>=3.4.0
+      - fastapi>=0.115.0
+      - uvicorn[standard]>=0.32.0
+      - httpx>=0.27.0
+      - python-dotenv>=1.0.0

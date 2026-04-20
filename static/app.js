@@ -1,0 +1,136 @@
+(function () {
+  const tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) {
+    tg.ready();
+    tg.expand();
+    if (tg.themeParams && tg.themeParams.bg_color) {
+      document.body.style.background = tg.themeParams.bg_color;
+    }
+  }
+
+  const form = document.getElementById("form");
+  const cityInput = document.getElementById("city");
+  const submitBtn = document.getElementById("submit");
+  const errorEl = document.getElementById("error");
+  const resultEl = document.getElementById("result");
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.hidden = !msg;
+  }
+
+  function getInitData() {
+    var w = window.Telegram && window.Telegram.WebApp;
+    if (w && typeof w.initData === "string" && w.initData.length) {
+      return w.initData;
+    }
+    try {
+      var u = new URL(window.location.href);
+      var q = u.searchParams.get("tgWebAppData");
+      if (q) {
+        return decodeURIComponent(q);
+      }
+    } catch (err) {}
+    return "";
+  }
+
+  async function resolveInitData() {
+    var d = getInitData();
+    if (d) return d;
+    await new Promise(function (r) {
+      setTimeout(r, 200);
+    });
+    d = getInitData();
+    return d;
+  }
+
+  function render(data) {
+    resultEl.innerHTML = "";
+    const loc = document.createElement("div");
+    loc.className = "loc";
+    loc.textContent = data.location;
+    resultEl.appendChild(loc);
+
+    (data.daily || []).forEach(function (d) {
+      const box = document.createElement("div");
+      box.className = "day";
+      const head = document.createElement("div");
+      head.className = "day-head";
+      const date = document.createElement("span");
+      date.className = "day-date";
+      date.textContent = d.label;
+      const temp = document.createElement("span");
+      temp.className = "day-temp";
+      temp.textContent =
+        d.temp_min != null && d.temp_max != null
+          ? d.temp_min + "…" + d.temp_max + " °C"
+          : "—";
+      head.appendChild(date);
+      head.appendChild(temp);
+      box.appendChild(head);
+
+      const desc = document.createElement("div");
+      desc.className = "day-desc";
+      desc.textContent = d.description || "";
+      box.appendChild(desc);
+
+      const meta = document.createElement("div");
+      meta.className = "day-meta";
+      meta.textContent =
+        "Ветер до " +
+        (d.wind_max_ms != null ? d.wind_max_ms : "—") +
+        " м/с · влажность ~" +
+        (d.humidity_avg != null ? d.humidity_avg : "—") +
+        "% · осадки до " +
+        (d.precipitation_prob_max != null ? d.precipitation_prob_max : "—") +
+        "%";
+      box.appendChild(meta);
+      resultEl.appendChild(box);
+    });
+
+    resultEl.hidden = false;
+  }
+
+  form.addEventListener("submit", async function (e) {
+    e.preventDefault();
+    showError("");
+    const city = (cityInput.value || "").trim();
+    if (!city) return;
+
+    submitBtn.disabled = true;
+    try {
+      const initData = await resolveInitData();
+      const res = await fetch("/api/weather", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ city: city, init_data: initData || null }),
+      });
+      const payload = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        var detail = payload.detail;
+        if (Array.isArray(detail) && detail[0] && detail[0].msg) {
+          detail = detail[0].msg;
+        }
+        if (
+          res.status === 401 &&
+          typeof detail === "string" &&
+          detail.indexOf("init_data") !== -1
+        ) {
+          detail +=
+            " Обычно так бывает с туннелем localtunnel (страница с вводом IP ломает контекст Telegram). Попробуйте ngrok: ngrok http 8000, обновите PUBLIC_BASE_URL. Локально без Telegram: ALLOW_UNVERIFIED_MINI_APP=1 в .env.";
+        }
+        showError(detail || "Ошибка запроса");
+        resultEl.hidden = true;
+        return;
+      }
+      render(payload);
+    } catch (err) {
+      showError("Нет сети или сервер недоступен");
+      resultEl.hidden = true;
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+})();
