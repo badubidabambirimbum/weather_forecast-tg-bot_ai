@@ -13,10 +13,52 @@
   const submitBtn = document.getElementById("submit");
   const errorEl = document.getElementById("error");
   const resultEl = document.getElementById("result");
+  const defaultSubmitText = submitBtn.textContent;
 
   function showError(msg) {
-    errorEl.textContent = msg;
+    errorEl.textContent = msg ? "⚠️ " + msg : "";
     errorEl.hidden = !msg;
+  }
+
+  function weatherEmoji(description) {
+    var text = String(description || "").toLowerCase();
+    if (!text) return "🌤️";
+
+    if (
+      text.indexOf("гроза") !== -1 ||
+      text.indexOf("thunder") !== -1
+    ) {
+      return "🌩️";
+    }
+    if (
+      text.indexOf("снег") !== -1 ||
+      text.indexOf("метель") !== -1 ||
+      text.indexOf("snow") !== -1
+    ) {
+      return "❄️";
+    }
+    if (
+      text.indexOf("дожд") !== -1 ||
+      text.indexOf("лив") !== -1 ||
+      text.indexOf("морось") !== -1 ||
+      text.indexOf("rain") !== -1
+    ) {
+      return "🌧️";
+    }
+    if (
+      text.indexOf("пасмур") !== -1 ||
+      text.indexOf("облач") !== -1 ||
+      text.indexOf("cloud") !== -1
+    ) {
+      return "☁️";
+    }
+    if (
+      text.indexOf("ясно") !== -1 ||
+      text.indexOf("clear") !== -1
+    ) {
+      return "☀️";
+    }
+    return "🌦️";
   }
 
   function getInitData() {
@@ -99,17 +141,18 @@
     resultEl.innerHTML = "";
     const loc = document.createElement("div");
     loc.className = "loc";
-    loc.textContent = data.location;
+    loc.textContent = "📍 " + data.location;
     resultEl.appendChild(loc);
 
     (data.daily || []).forEach(function (d) {
+      var wx = weatherEmoji(d.description);
       const box = document.createElement("div");
       box.className = "day";
       const head = document.createElement("div");
       head.className = "day-head";
       const date = document.createElement("span");
       date.className = "day-date";
-      date.textContent = d.label;
+      date.textContent = wx + " " + d.label;
       const temp = document.createElement("span");
       temp.className = "day-temp";
       temp.textContent =
@@ -122,17 +165,17 @@
 
       const desc = document.createElement("div");
       desc.className = "day-desc";
-      desc.textContent = d.description || "";
+      desc.textContent = wx + " " + (d.description || "Нет описания");
       box.appendChild(desc);
 
       const meta = document.createElement("div");
       meta.className = "day-meta";
       meta.textContent =
-        "Ветер до " +
+        "💨 Ветер до " +
         (d.wind_max_ms != null ? d.wind_max_ms : "—") +
-        " м/с · влажность ~" +
+        " м/с · 💧 влажность ~" +
         (d.humidity_avg != null ? d.humidity_avg : "—") +
-        "% · осадки до " +
+        "% · 🌧️ осадки до " +
         (d.precipitation_prob_max != null ? d.precipitation_prob_max : "—") +
         "%";
       box.appendChild(meta);
@@ -149,6 +192,7 @@
     if (!city) return;
 
     submitBtn.disabled = true;
+    submitBtn.textContent = "⏳ Загружаем...";
     try {
       const initData = await resolveInitData();
       const tgDebug = getTelegramDebug();
@@ -197,6 +241,7 @@
       resultEl.hidden = true;
     } finally {
       submitBtn.disabled = false;
+      submitBtn.textContent = defaultSubmitText;
     }
   });
 })();
