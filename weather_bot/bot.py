@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, WebAppInfo
 
 from weather_bot import config
 
@@ -35,28 +35,27 @@ def _resolve_webapp_url(base_url: str) -> str | None:
 async def cmd_start(message: Message) -> None:
     url = _resolve_webapp_url(config.PUBLIC_BASE_URL)
     if url:
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
                 [
-                    KeyboardButton(
-                        text="Прогноз на 5 дней",
+                    InlineKeyboardButton(
+                        text="🌤️ Открыть прогноз",
                         web_app=WebAppInfo(url=url),
                     )
                 ]
-            ],
-            resize_keyboard=True,
+            ]
         )
         await message.answer(
-            "Привет! Нажми кнопку ниже — откроется приложение с прогнозом погоды.\n"
-            "Введи город и нажми «Показать прогноз».\n\n"
-            "Также можно написать город в чат: например `Москва` или `London`.",
+            "👋 Привет! Нажми кнопку ниже — откроется Mini App с прогнозом погоды.\n"
+            "🏙️ Введи город и нажми «Показать прогноз».\n\n"
+            "💬 Также можно написать город прямо в чат: например `Москва` или `London`.",
             reply_markup=kb,
             parse_mode=ParseMode.MARKDOWN,
         )
     else:
         await message.answer(
-            "Привет! Напиши в чат название города — например `Москва` или `London`.\n\n"
-            "Кнопка Mini App появится, если в .env задать `PUBLIC_BASE_URL` — см. комментарий там.",
+            "👋 Привет! Напиши в чат название города — например `Москва` или `London`.\n\n"
+            "ℹ️ Кнопка Mini App появится, если в `.env` задать `PUBLIC_BASE_URL` (HTTPS) — см. комментарии в файле.",
             parse_mode=ParseMode.MARKDOWN,
         )
 
@@ -68,7 +67,7 @@ async def city_text(message: Message) -> None:
         return
 
     if not config.OPENWEATHER_API_KEY:
-        await message.answer("На сервере не задан OPENWEATHER_API_KEY.")
+        await message.answer("⚠️ На сервере не задан `OPENWEATHER_API_KEY`.")
         return
 
     from weather_bot.weather_service import fetch_forecast
@@ -76,20 +75,20 @@ async def city_text(message: Message) -> None:
     try:
         data = await fetch_forecast(config.OPENWEATHER_API_KEY, text)
     except ValueError as e:
-        await message.answer(str(e))
+        await message.answer(f"🔎 {e}")
         return
     except Exception:
         logger.exception("forecast failed")
-        await message.answer("Не удалось получить прогноз. Попробуйте позже.")
+        await message.answer("😔 Не удалось получить прогноз. Попробуйте чуть позже.")
         return
 
     loc = data["location"]
-    lines = [f"*{loc}*", ""]
+    lines = [f"📍 *{loc}*", ""]
     for d in data.get("daily", [])[:5]:
         lines.append(
-            f"*{d['label']}*: {d['temp_min']}…{d['temp_max']} °C, "
-            f"{d['description']}, ветер до {d['wind_max_ms']} м/с, "
-            f"осадки до {d['precipitation_prob_max']}%"
+            f"🗓️ *{d['label']}*: 🌡️ {d['temp_min']}…{d['temp_max']} °C, "
+            f"{d['description']}, 💨 ветер до {d['wind_max_ms']} м/с, "
+            f"🌧️ осадки до {d['precipitation_prob_max']}%"
         )
     await message.answer("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 

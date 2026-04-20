@@ -21,6 +21,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 class WeatherRequest(BaseModel):
     city: str = Field(min_length=1, max_length=120)
     init_data: str | None = None
+    client_debug: dict | None = None
 
 
 def create_app() -> FastAPI:
@@ -36,6 +37,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/weather")
     async def weather(body: WeatherRequest):
+        logger.info(
+            "weather request: init_data_len=%s client_debug=%s",
+            len(body.init_data) if body.init_data else 0,
+            body.client_debug,
+        )
         city = body.city.strip()
         if not city:
             raise HTTPException(status_code=400, detail="Укажите город")
@@ -47,12 +53,13 @@ def create_app() -> FastAPI:
             try:
                 verify_init_data(body.init_data, config.TELEGRAM_BOT_TOKEN)
             except ValueError as e:
-                logger.warning("initData: %s", e)
+                logger.warning("initData verify failed: %s", e)
                 raise HTTPException(status_code=401, detail="Недействительные данные Telegram") from e
         elif not config.ALLOW_UNVERIFIED_MINI_APP:
+            logger.warning("initData is missing; rejected request")
             raise HTTPException(
                 status_code=401,
-                detail="Нужны данные Telegram Mini App (init_data) или ALLOW_UNVERIFIED_MINI_APP=1",
+                detail="Нужны данные Telegram Mini App (init_data). Откройте приложение из кнопки в чате Telegram.",
             )
 
         try:
