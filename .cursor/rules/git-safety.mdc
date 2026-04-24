@@ -1,0 +1,33 @@
+---
+description: Безопасная политика выполнения git-команд агентом
+alwaysApply: true
+---
+
+# Git safety and approvals
+
+- Для git-команд использовать безопасный режим по умолчанию.
+- Команды только для чтения можно выполнять без дополнительного согласования:
+  - `git status`
+  - `git diff`
+  - `git log`
+  - `git show`
+  - `git branch`
+  - `git fetch`
+  - `git pull --ff-only`
+- Обычные рабочие команды допустимы без рискованных флагов:
+  - `git switch <branch>`
+  - `git checkout <branch>`
+  - `git add <files>`
+  - `git commit -m "..."`
+  - `git push`
+- Всегда требовать явного подтверждения пользователя для потенциально опасных команд:
+  - `git push --force`
+  - `git push -f`
+  - `git reset --hard`
+  - `git clean -fd`
+  - `git clean -fdx`
+  - `git rebase -i`
+  - `git checkout -- <file>`
+  - `git branch -D`
+  - удаление веток и тегов на remote
+- Никогда не выполнять разрушительные git-команды без явного запроса пользователя.
