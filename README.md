@@ -1,9 +1,10 @@
 # Telegram Weather Mini App - Шаг 1
 
-Минимальный production-like каркас Telegram Mini App:
+MVP Telegram Weather Mini App:
 - backend на `FastAPI` отдает API и статический Mini App;
 - Telegram-бот на `aiogram` отправляет кнопку открытия WebApp;
-- фронтенд Mini App делает запрос в API и показывает mock-ответ.
+- фронтенд Mini App делает запрос в API и показывает mock-ответ;
+- backend также предоставляет API прогноза погоды через Open-Meteo.
 
 ## Содержание
 
@@ -32,7 +33,11 @@
 - Backend (`backend/app.py`):
   - `GET /health` -> `{"ok": true}`;
   - `GET /api/mock` -> тестовое сообщение;
+  - `GET /api/forecast?city=<город>&days=<1|3|10>` -> дневной прогноз;
   - раздача статики Mini App по корневому пути `/`.
+- Слой интеграции с погодным API:
+  - `backend/services/open_meteo.py` реализует геокодинг и получение прогноза из Open-Meteo;
+  - данные нормализуются в единый формат ответа (`date`, `min_temp_c`, `max_temp_c`, `weather`).
 
 ## Pipeline запуска для пользователя
 
@@ -41,6 +46,7 @@
 - Python 3.10+.
 - Telegram-бот с токеном от `@BotFather`.
 - Публичный `https://` URL (например, через туннель), доступный из Telegram.
+- Доступ в интернет для вызова Open-Meteo API.
 
 ### 2) Установка зависимостей
 
@@ -115,6 +121,7 @@ python bot/main.py
 ```bash
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/api/mock
+curl "http://127.0.0.1:8000/api/forecast?city=Moscow&days=3"
 ```
 
 Проверьте пользовательский сценарий:
@@ -122,6 +129,11 @@ curl http://127.0.0.1:8000/api/mock
 2. Нажмите `Открыть mini app`.
 3. В Mini App нажмите `Проверить mini app`.
 4. Ожидаемый результат: `Здесь скоро появится прогноз погоды, следите за новостями:)`.
+
+Проверьте API прогноза:
+- запрос: `GET /api/forecast?city=Moscow&days=3`;
+- ожидаемо: `200 OK` и массив `forecast` из 3 элементов;
+- при `days` не из набора `1/3/10` ожидается `422`.
 
 ### Быстрый запуск (кратко)
 
@@ -144,8 +156,9 @@ MINIAPP_URL=https://<your-ngrok-domain>
 ```text
 backend/
   app.py                 # FastAPI-приложение, API и раздача статики Mini App
-  schemas.py             # Pydantic-схемы (заготовка под следующие шаги)
-  services/              # Сервисный слой backend (заготовка)
+  schemas.py             # Pydantic-схемы для запроса/ответа API прогноза
+  services/
+    open_meteo.py        # Клиент Open-Meteo (геокодинг + дневной прогноз)
 bot/
   main.py                # Telegram-бот (aiogram), команда /start и WebApp-кнопка
 miniapp/
@@ -160,9 +173,11 @@ requirements.txt         # Python-зависимости
 
 ## Тесты
 
-Сейчас в проекте есть API smoke-тесты:
+Сейчас в проекте есть API-тесты:
 - `test_health_endpoint` проверяет доступность и контракт `/health`;
 - `test_mock_endpoint` проверяет ответ `/api/mock`.
+- `test_forecast_endpoint_success` проверяет успешный ответ `/api/forecast` с мокнутым клиентом Open-Meteo.
+- `test_forecast_endpoint_validation_error` проверяет валидацию `days` (допустимы только `1/3/10`).
 
 Запуск всех тестов:
 
@@ -171,5 +186,6 @@ python -m pytest
 ```
 
 Успешный результат:
-- `2 passed` (или больше, если добавлены новые тесты);
+- `4 passed` (или больше, если добавлены новые тесты);
 - без ошибок импорта и падений endpoint'ов.
+
