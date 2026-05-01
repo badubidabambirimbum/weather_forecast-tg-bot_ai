@@ -7,10 +7,10 @@ todos:
     status: completed
   - id: bootstrap-project
     content: Создать каркас Python проекта и базовые директории bot/backend/miniapp
-    status: pending
+    status: completed
   - id: implement-bot-entry
     content: Реализовать aiogram-бота с /start и кнопкой открытия Mini App
-    status: pending
+    status: completed
   - id: implement-forecast-api
     content: Сделать FastAPI endpoint прогноза с интеграцией OpenWeatherMap
     status: pending
