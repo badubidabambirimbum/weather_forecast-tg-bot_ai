@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "python .cursor/hooks/git_policy.py",
+        "matcher": "(^|\\s)git\\s+(commit|push)\\b",
+        "timeout": 300,
+        "failClosed": true
+      }
+    ]
+  }
+}

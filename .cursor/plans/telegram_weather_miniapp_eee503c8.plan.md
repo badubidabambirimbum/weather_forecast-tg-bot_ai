@@ -13,7 +13,7 @@ todos:
     status: completed
   - id: implement-forecast-api
     content: Сделать FastAPI endpoint прогноза с интеграцией OpenWeatherMap
-    status: pending
+    status: completed
   - id: build-miniapp-ui
     content: Сделать Mini App форму города/периода и отображение результатов
     status: pending
