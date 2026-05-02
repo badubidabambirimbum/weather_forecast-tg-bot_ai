@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 
-from backend.schemas import ForecastQuery, ForecastResponse
+from backend.schemas import ForecastQuery, ForecastResponse, GeocodeResponse, GeocodeSuggestion
 from backend.services.open_meteo import OpenMeteoClient, OpenMeteoError
 
 load_dotenv()
@@ -68,6 +68,28 @@ def build_open_meteo_client() -> OpenMeteoClient:
 async def healthcheck() -> dict[str, bool]:
     """Проверка, что backend запущен и отвечает."""
     return {"ok": True}
+
+
+@app.get("/api/geocode", response_model=GeocodeResponse)
+async def geocode_suggest(query: str = Query(..., min_length=2, max_length=80)) -> GeocodeResponse:
+    """Подсказки городов для автодополнения (Open-Meteo Geocoding, без API-ключа)."""
+    try:
+        client = build_open_meteo_client()
+        raw = await client.suggest_cities(query=query, limit=8)
+    except OpenMeteoError as exc:
+        logger.warning(
+            "GET /api/geocode: ошибка Open-Meteo query_len=%s detail=%s",
+            len(query),
+            exc,
+        )
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception:
+        logger.exception("GET /api/geocode: непредвиденная ошибка query_len=%s", len(query))
+        raise HTTPException(status_code=500, detail="Unexpected server error") from None
+
+    suggestions = [GeocodeSuggestion(name=item["name"], label=item["label"]) for item in raw]
+    logger.info("GET /api/geocode: ok query_len=%s count=%s", len(query), len(suggestions))
+    return GeocodeResponse(suggestions=suggestions)
 
 
 @app.get("/api/forecast", response_model=ForecastResponse)

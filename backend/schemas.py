@@ -24,6 +24,7 @@ class ForecastPoint(BaseModel):
     date: str
     min_temp_c: float
     max_temp_c: float
+    weather_code: int = Field(description="Код погоды WMO (Open-Meteo); для иконок на фронтенде.")
     weather: str
 
 
@@ -33,4 +34,17 @@ class ForecastResponse(BaseModel):
     city: str
     days: int
     forecast: list[ForecastPoint]
+
+
+class GeocodeSuggestion(BaseModel):
+    """Один вариант автодополнения города (Open-Meteo Geocoding)."""
+
+    name: str = Field(description="Имя для запроса прогноза (как в геокодере).")
+    label: str = Field(description="Подпись в списке: город, регион, страна.")
+
+
+class GeocodeResponse(BaseModel):
+    """Ответ подсказок по городам для поля ввода Mini App."""
+
+    suggestions: list[GeocodeSuggestion]
 

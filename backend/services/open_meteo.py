@@ -76,6 +76,48 @@ class OpenMeteoClient:
         first = results[0]
         return float(first["latitude"]), float(first["longitude"]), first.get("name", city)
 
+    async def suggest_cities(self, query: str, limit: int = 8) -> list[dict[str, str]]:
+        """Возвращает до `limit` подсказок городов по префиксу/фрагменту имени (пустой список, если ничего не найдено)."""
+        trimmed = query.strip()
+        if len(trimmed) < 2:
+            return []
+        limit = max(1, min(int(limit), 10))
+        params = {"name": trimmed, "count": limit, "language": "ru", "format": "json"}
+        logger.debug("Open-Meteo geocoding suggest: query_len=%s limit=%s", len(trimmed), limit)
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(self.geo_url, params=params)
+        except httpx.RequestError:
+            logger.exception("Open-Meteo geocoding suggest: сетевая ошибка запроса")
+            raise OpenMeteoError("Geo API request failed") from None
+
+        if response.status_code != 200:
+            logger.warning(
+                "Open-Meteo geocoding suggest: неуспешный HTTP status=%s",
+                response.status_code,
+            )
+            raise OpenMeteoError("Geo API request failed")
+
+        payload = response.json()
+        results = payload.get("results") or []
+        out: list[dict[str, str]] = []
+        for r in results:
+            name = str(r.get("name", "")).strip()
+            if not name:
+                continue
+            raw_country = r.get("country")
+            country = str(raw_country).strip() if raw_country is not None else ""
+            raw_admin1 = r.get("admin1")
+            admin1 = str(raw_admin1).strip() if raw_admin1 is not None else ""
+            parts: list[str] = [name]
+            if admin1 and admin1.casefold() != name.casefold():
+                parts.append(admin1)
+            if country:
+                parts.append(country)
+            label = ", ".join(parts)
+            out.append({"name": name, "label": label})
+        return out
+
     async def get_daily_forecast(self, lat: float, lon: float, days: int) -> list[dict]:
         """Возвращает список дневного прогноза за выбранное число дней."""
         params = {
@@ -117,12 +159,17 @@ class OpenMeteoClient:
 
         points: list[dict] = []
         for date, t_min, t_max, code in zip(dates, t_mins, t_maxs, w_codes):
+            try:
+                code_int = int(code)
+            except (TypeError, ValueError):
+                code_int = 0
             points.append(
                 {
                     "date": date,
                     "min_temp_c": round(float(t_min), 1),
                     "max_temp_c": round(float(t_max), 1),
-                    "weather": WEATHER_CODE_RU.get(int(code), "нет данных"),
+                    "weather_code": code_int,
+                    "weather": WEATHER_CODE_RU.get(code_int, "нет данных"),
                 }
             )
         return points
