@@ -83,7 +83,7 @@ async def handle_start(message: Message) -> None:
         chat.id if chat else None,
     )
     await message.answer(
-        "Нажмите кнопку ниже и проверьте mock-ответ mini app.",
+        "Нажмите кнопку ниже, чтобы открыть Mini App и запросить прогноз.",
         reply_markup=webapp_keyboard(miniapp_url),
     )
 

@@ -4,8 +4,6 @@ if (tg) {
   tg.expand();
 }
 
-const mockButton = document.getElementById("mockButton");
-const mockResult = document.getElementById("mockResult");
 const cityInput = document.getElementById("cityInput");
 const daysSelect = document.getElementById("daysSelect");
 const forecastButton = document.getElementById("forecastButton");
@@ -44,16 +42,6 @@ async function fetchJson(url) {
   }
   return data;
 }
-
-mockButton.addEventListener("click", async () => {
-  mockResult.textContent = "Проверяем...";
-  try {
-    const data = await fetchJson("/api/mock");
-    mockResult.textContent = data.message;
-  } catch (error) {
-    mockResult.textContent = `Ошибка: ${error.message}`;
-  }
-});
 
 forecastButton.addEventListener("click", async () => {
   const city = cityInput.value.trim();

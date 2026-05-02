@@ -8,15 +8,12 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 
 from backend.schemas import ForecastQuery, ForecastResponse
 from backend.services.open_meteo import OpenMeteoClient, OpenMeteoError
 
-# Единый ответ для этапа проверки интеграции Mini App.
-MOCK_MESSAGE = "Здесь скоро появится прогноз погоды, следите за новостями:)"
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -71,12 +68,6 @@ def build_open_meteo_client() -> OpenMeteoClient:
 async def healthcheck() -> dict[str, bool]:
     """Проверка, что backend запущен и отвечает."""
     return {"ok": True}
-
-
-@app.get("/api/mock")
-async def mock_message() -> JSONResponse:
-    """Тестовый endpoint для кнопки в Mini App на шаге 1."""
-    return JSONResponse(content={"message": MOCK_MESSAGE})
 
 
 @app.get("/api/forecast", response_model=ForecastResponse)

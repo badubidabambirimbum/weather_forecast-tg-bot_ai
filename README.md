@@ -3,8 +3,8 @@
 MVP Telegram Weather Mini App:
 - backend на `FastAPI` отдает API и статический Mini App;
 - Telegram-бот на `aiogram` отправляет кнопку открытия WebApp;
-- фронтенд Mini App делает запрос в API и показывает mock-ответ;
-- backend также предоставляет API прогноза погоды через Open-Meteo.
+- фронтенд Mini App запрашивает прогноз через `GET /api/forecast`;
+- backend предоставляет API прогноза погоды через Open-Meteo.
 
 ## Содержание
 
@@ -29,11 +29,9 @@ MVP Telegram Weather Mini App:
 - Mini App (`miniapp/index.html`, `miniapp/app.js`):
   - инициализируется через Telegram WebApp SDK;
   - форма: город, выбор периода `1 / 3 / 10` дней, кнопка `Показать прогноз` -> `GET /api/forecast`;
-  - список дней: дата, min/max °C, описание погоды (по коду Open‑Meteo);
-  - дополнительно: кнопка `Проверить mini app` -> `GET /api/mock` (smoke‑тест интеграции).
+  - список дней: дата, min/max °C, описание погоды (по коду Open‑Meteo).
 - Backend (`backend/app.py`):
   - `GET /health` -> `{"ok": true}`;
-  - `GET /api/mock` -> тестовое сообщение;
   - `GET /api/forecast?city=<город>&days=<1|3|10>` -> дневной прогноз;
   - раздача статики Mini App по корневому пути `/`.
 - Слой интеграции с погодным API:
@@ -125,7 +123,6 @@ python bot/main.py
 
 ```bash
 curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/api/mock
 curl "http://127.0.0.1:8000/api/forecast?city=Moscow&days=3"
 ```
 
@@ -134,7 +131,6 @@ curl "http://127.0.0.1:8000/api/forecast?city=Moscow&days=3"
 2. Нажмите `Открыть mini app`.
 3. Введите город (например `Москва`), выберите `1`, `3` или `10` дней, нажмите `Показать прогноз`.
 4. Должен появиться список строк вида `YYYY-MM-DD: min … max, описание`.
-5. Опционально: `Проверить mini app` -> заглушка `Здесь скоро появится прогноз погоды, следите за новостями:)`.
 
 Проверьте API прогноза:
 - запрос: `GET /api/forecast?city=Moscow&days=3`;
@@ -169,10 +165,10 @@ bot/
   main.py                # Telegram-бот (aiogram), команда /start и WebApp-кнопка
 miniapp/
   index.html             # UI Mini App
-  app.js                 # Вызов /api/forecast и /api/mock, разбор ошибок API
+  app.js                 # Вызов /api/forecast, разбор ошибок API
   styles.css             # Стили интерфейса Mini App
 tests/
-  test_api.py            # API smoke-тесты для /health и /api/mock
+  test_api.py            # API smoke-тесты для /health и /api/forecast
 requirements.txt         # Python-зависимости
 .env.example             # Пример переменных окружения
 ```
@@ -181,8 +177,7 @@ requirements.txt         # Python-зависимости
 
 Сейчас в проекте есть API-тесты:
 - `test_health_endpoint` проверяет доступность и контракт `/health`;
-- `test_mock_endpoint` проверяет ответ `/api/mock`.
-- `test_forecast_endpoint_success` проверяет успешный ответ `/api/forecast` с мокнутым клиентом Open-Meteo.
+- `test_forecast_endpoint_success` проверяет успешный ответ `/api/forecast` с мокнутым клиентом Open-Meteo;
 - `test_forecast_endpoint_validation_error` проверяет валидацию `days` (допустимы только `1/3/10`).
 
 Запуск всех тестов:
@@ -192,6 +187,6 @@ python -m pytest
 ```
 
 Успешный результат:
-- `4 passed` (или больше, если добавлены новые тесты);
+- `3 passed` (или больше, если добавлены новые тесты);
 - без ошибок импорта и падений endpoint'ов.
 
