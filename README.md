@@ -67,6 +67,10 @@ copy .env.example .env
 - `BOT_TOKEN` - токен Telegram-бота;
 - `MINIAPP_URL` - публичный `https://` URL backend (без локальных `http://localhost`).
 
+Опционально для backend (уровень логов пакета `backend` при запуске через uvicorn):
+
+- `LOG_LEVEL` - `DEBUG`, `INFO`, `WARNING` или `ERROR` (по умолчанию `INFO`).
+
 ### 4) Запуск компонентов
 
 Запустите backend:

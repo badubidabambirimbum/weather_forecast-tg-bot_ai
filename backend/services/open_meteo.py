@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class OpenMeteoError(Exception):
@@ -45,14 +49,28 @@ class OpenMeteoClient:
     async def get_city_coordinates(self, city: str) -> tuple[float, float, str]:
         """Ищет координаты города через Open-Meteo geocoding API."""
         params = {"name": city, "count": 1, "language": "ru", "format": "json"}
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.get(self.geo_url, params=params)
+        logger.debug(
+            "Open-Meteo geocoding: query_len=%s",
+            len(city),
+        )
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(self.geo_url, params=params)
+        except httpx.RequestError:
+            logger.exception("Open-Meteo geocoding: сетевая ошибка запроса")
+            raise OpenMeteoError("Geo API request failed") from None
+
         if response.status_code != 200:
+            logger.warning(
+                "Open-Meteo geocoding: неуспешный HTTP status=%s",
+                response.status_code,
+            )
             raise OpenMeteoError("Geo API request failed")
 
         payload = response.json()
         results = payload.get("results", [])
         if not results:
+            logger.info("Open-Meteo geocoding: город не найден (пустой results)")
             raise OpenMeteoError("City not found")
 
         first = results[0]
@@ -67,9 +85,24 @@ class OpenMeteoClient:
             "timezone": "UTC",
             "forecast_days": days,
         }
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.get(self.forecast_url, params=params)
+        logger.debug(
+            "Open-Meteo forecast: days=%s lat=%.4f lon=%.4f",
+            days,
+            lat,
+            lon,
+        )
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(self.forecast_url, params=params)
+        except httpx.RequestError:
+            logger.exception("Open-Meteo forecast: сетевая ошибка запроса")
+            raise OpenMeteoError("Forecast API request failed") from None
+
         if response.status_code != 200:
+            logger.warning(
+                "Open-Meteo forecast: неуспешный HTTP status=%s",
+                response.status_code,
+            )
             raise OpenMeteoError("Forecast API request failed")
 
         payload = response.json()
@@ -79,6 +112,7 @@ class OpenMeteoClient:
         t_maxs = daily.get("temperature_2m_max", [])
         w_codes = daily.get("weather_code", [])
         if not dates:
+            logger.warning("Open-Meteo forecast: пустой блок daily.time")
             raise OpenMeteoError("Empty forecast response")
 
         points: list[dict] = []

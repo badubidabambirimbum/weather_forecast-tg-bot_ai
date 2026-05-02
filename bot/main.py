@@ -64,12 +64,24 @@ async def handle_start(message: Message) -> None:
     """Отправляет пользователю кнопку для запуска Mini App."""
     miniapp_url = resolve_miniapp_url(MINIAPP_URL)
     if miniapp_url is None:
-        logger.warning("MINIAPP_URL не задан или не является HTTPS URL")
+        parsed = urlparse(MINIAPP_URL.strip()) if MINIAPP_URL else None
+        logger.warning(
+            "MINIAPP_URL не задан или не HTTPS: scheme=%s host=%s",
+            (parsed.scheme if parsed else ""),
+            (parsed.netloc if parsed else ""),
+        )
         await message.answer(
             "Mini App URL пока не настроен. Задайте публичный HTTPS URL в MINIAPP_URL и перезапустите бота."
         )
         return
 
+    user = message.from_user
+    chat = message.chat
+    logger.info(
+        "Команда /start: user_id=%s chat_id=%s",
+        user.id if user else None,
+        chat.id if chat else None,
+    )
     await message.answer(
         "Нажмите кнопку ниже и проверьте mock-ответ mini app.",
         reply_markup=webapp_keyboard(miniapp_url),
@@ -78,11 +90,16 @@ async def handle_start(message: Message) -> None:
 
 async def main() -> None:
     """Точка входа: запускает long-polling Telegram-бота."""
+    logger.info("Запуск Telegram-бота (long polling)")
     bot = Bot(token=BOT_TOKEN)
     try:
         await dp.start_polling(bot, drop_pending_updates=True)
+    except Exception:
+        logger.exception("Ошибка во время работы polling")
+        raise
     finally:
         await bot.session.close()
+        logger.info("Polling остановлен, HTTP-сессия бота закрыта")
 
 
 if __name__ == "__main__":
