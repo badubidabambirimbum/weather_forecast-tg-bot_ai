@@ -1,6 +1,6 @@
 ---
 name: Telegram weather miniapp
-overview: "Создать Telegram-бота с Mini App: пользователь вводит город, выбирает период 1/3/10 дней и получает min/max температуру и погодные условия за выбранный диапазон."
+overview: "Создать Telegram-бота с Mini App: пользователь вводит город, выбирает период 1/3/10 дней и получает min/max температуру и погодные условия за выбранный диапазон (данные Open‑Meteo, без API‑ключа)."
 todos:
   - id: miniapp-mock-first
     content: Сделать mock Mini App и проверить открытие + нажатие кнопки с заглушкой-ответом
@@ -12,14 +12,14 @@ todos:
     content: Реализовать aiogram-бота с /start и кнопкой открытия Mini App
     status: completed
   - id: implement-forecast-api
-    content: Сделать FastAPI endpoint прогноза с интеграцией OpenWeatherMap
+    content: Сделать FastAPI endpoint прогноза с интеграцией Open‑Meteo
     status: completed
   - id: build-miniapp-ui
     content: Сделать Mini App форму города/периода и отображение результатов
-    status: pending
+    status: completed
   - id: config-and-tests
     content: Добавить .env.example, минимальные тесты и README с запуском
-    status: pending
+    status: completed
 isProject: false
 ---
 
@@ -27,7 +27,7 @@ isProject: false
 
 ## Цель
 
-Собрать MVP Telegram-бота на Python, где основной ввод/вывод выполняется через Mini App, а данные берутся из OpenWeatherMap.
+Собрать MVP Telegram-бота на Python, где основной ввод/вывод выполняется через Mini App, а данные прогноза берутся из Open‑Meteo (геокодинг и дневной прогноз без API‑ключа).
 
 ## Архитектура
 
@@ -36,7 +36,7 @@ flowchart LR
   user[UserInTelegram] --> bot[AiogramBot]
   bot --> miniapp[WebMiniAppUI]
   miniapp --> api[FastAPIBackend]
-  api --> owm[OpenWeatherMapAPI]
+  api --> openmeteo[OpenMeteoAPI]
   api --> miniapp
   miniapp --> user
 ```
@@ -55,17 +55,17 @@ flowchart LR
   - отображение списка дней с `min/max` температурой и описанием погоды.
 - Реализовать backend endpoint для прогноза (например, `GET /api/forecast?city=...&days=...`):
   - валидация входных параметров,
-  - геокодинг города через OpenWeatherMap,
-  - запрос прогноза и трансформация в единый ответ для UI,
-  - обработка ошибок (город не найден, лимиты API, сетевые ошибки).
-- Добавить конфигурацию через `.env` (токен бота, API-ключ OpenWeatherMap, URL Mini App).
+  - геокодинг города через Open‑Meteo Geocoding API,
+  - запрос дневного прогноза через Open‑Meteo Forecast API и нормализация ответа для UI (в т.ч. описание по `weather_code`),
+  - обработка ошибок (город не найден, недоступность внешнего API, сетевые ошибки).
+- Добавить конфигурацию через `.env` (токен бота, публичный URL Mini App; ключ погоды не требуется).
 - Добавить минимальные тесты backend логики (валидация и формат ответа) и инструкции запуска.
 
 ## Предлагаемая структура файлов
 
 - `[project-root]/bot/main.py` — запуск бота и команда `/start`.
 - `[project-root]/backend/app.py` — FastAPI приложение.
-- `[project-root]/backend/services/openweather.py` — клиент OpenWeatherMap.
+- `[project-root]/backend/services/open_meteo.py` — клиент Open‑Meteo (геокодинг + дневной прогноз).
 - `[project-root]/backend/schemas.py` — модели запросов/ответов.
 - `[project-root]/miniapp/index.html` и `[project-root]/miniapp/app.js` — UI Mini App.
 - `[project-root]/.env.example` — пример переменных окружения.
