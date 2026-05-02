@@ -172,6 +172,51 @@ input[type="text"]:focus {
   background: color-mix(in srgb, var(--app-accent) 14%, var(--app-card-bg));
 }
 
+.recent-cities {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.recent-cities-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--app-muted);
+}
+
+.recent-cities-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-city-chip {
+  border: 1px solid color-mix(in srgb, var(--app-accent) 35%, var(--app-border));
+  background: color-mix(in srgb, var(--app-accent) 10%, var(--app-card-bg));
+  color: var(--app-text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: min(100%, 14rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-city-chip:hover {
+  background: color-mix(in srgb, var(--app-accent) 18%, var(--app-card-bg));
+  border-color: color-mix(in srgb, var(--app-accent) 50%, var(--app-border));
+}
+
+.recent-city-chip:active {
+  transform: scale(0.98);
+}
+
 /* Ползунок: три дискретных положения (1 / 3 / 10 дней) */
 .days-slider-block {
   margin-top: 16px;

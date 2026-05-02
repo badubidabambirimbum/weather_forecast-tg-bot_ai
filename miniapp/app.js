@@ -8,6 +8,9 @@ if (tg) {
 
 const LS_CITY_KEY = "wf_miniapp_city";
 const LS_DAYS_KEY = "wf_miniapp_days";
+/** JSON-массив до 3 последних успешно запрошенных городов (имя из ответа API). */
+const LS_RECENT_CITIES_KEY = "wf_miniapp_recent_cities";
+const MAX_RECENT_CITIES = 3;
 
 /** Индекс ползунка 0..2 → параметр `days` для API. */
 const SLIDER_TO_DAYS = ["1", "3", "10"];
@@ -24,6 +27,8 @@ const forecastSkeleton = document.getElementById("forecastSkeleton");
 const forecastSummary = document.getElementById("forecastSummary");
 const forecastCards = document.getElementById("forecastCards");
 const citySuggestList = document.getElementById("citySuggestList");
+const recentCitiesRow = document.getElementById("recentCitiesRow");
+const recentCitiesChips = document.getElementById("recentCitiesChips");
 
 /**
  * Подставляет цвета из Telegram Mini App в CSS-переменные страницы.
@@ -114,6 +119,72 @@ function persistFormToStorage(city, days) {
     localStorage.setItem(LS_DAYS_KEY, days);
   } catch {
     /* игнорируем */
+  }
+}
+
+/**
+ * Читает список последних городов из localStorage (максимум 3).
+ * @returns {string[]}
+ */
+function loadRecentCities() {
+  try {
+    const raw = localStorage.getItem(LS_RECENT_CITIES_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((s) => typeof s === "string" && s.trim().length >= 2 && s.trim().length <= 100)
+      .map((s) => s.trim())
+      .slice(0, MAX_RECENT_CITIES);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Добавляет город в начало списка «недавних», без дубликатов (без учёта регистра), не более 3 записей.
+ * @param {string} cityName — обычно нормализованное имя из ответа `GET /api/forecast`.
+ */
+function rememberRecentCity(cityName) {
+  const t = String(cityName || "").trim();
+  if (t.length < 2 || t.length > 100) return;
+  let list = loadRecentCities();
+  list = list.filter((c) => c.toLowerCase() !== t.toLowerCase());
+  list.unshift(t);
+  list = list.slice(0, MAX_RECENT_CITIES);
+  try {
+    localStorage.setItem(LS_RECENT_CITIES_KEY, JSON.stringify(list));
+  } catch {
+    return;
+  }
+  renderRecentCitiesChips();
+}
+
+/**
+ * Рендерит кнопки-чипы под полем города; скрывает блок, если список пуст.
+ */
+function renderRecentCitiesChips() {
+  if (!recentCitiesRow || !recentCitiesChips) return;
+  const list = loadRecentCities();
+  recentCitiesChips.replaceChildren();
+  if (list.length === 0) {
+    recentCitiesRow.hidden = true;
+    return;
+  }
+  recentCitiesRow.hidden = false;
+  for (const c of list) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "recent-city-chip";
+    btn.textContent = c;
+    btn.setAttribute("aria-label", `Подставить город ${c}`);
+    btn.addEventListener("click", () => {
+      cityInput.value = c;
+      hideCitySuggestions();
+      scheduleCitySuggest();
+      cityInput.focus();
+    });
+    recentCitiesChips.appendChild(btn);
   }
 }
 
@@ -533,7 +604,11 @@ async function submitForecast() {
     );
     hideSkeleton();
     renderForecastCards(data);
-    persistFormToStorage(city, days);
+    const resolvedCity =
+      typeof data.city === "string" && data.city.trim() ? data.city.trim() : city;
+    cityInput.value = resolvedCity;
+    persistFormToStorage(resolvedCity, days);
+    rememberRecentCity(resolvedCity);
   } catch (error) {
     hideSkeleton();
     const msg = error instanceof Error ? error.message : String(error);
@@ -576,6 +651,7 @@ cityInput.addEventListener("keydown", (e) => {
 });
 
 restoreFormFromStorage();
+renderRecentCitiesChips();
 syncDaysSliderUi();
 
 daysSlider.addEventListener("input", syncDaysSliderUi);

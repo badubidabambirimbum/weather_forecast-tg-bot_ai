@@ -2,7 +2,7 @@
 
 MVP Telegram Weather Mini App:
 - backend на `FastAPI` отдает API и статический Mini App;
-- Telegram-бот на `aiogram` отправляет кнопку открытия WebApp;
+- Telegram-бот на `aiogram`: WebApp, команды `/help`, `/about`, `/ping`, `/forecast`, меню команд;
 - фронтенд Mini App запрашивает прогноз через `GET /api/forecast`;
 - backend предоставляет API прогноза погоды через Open-Meteo.
 
@@ -22,14 +22,17 @@ MVP Telegram Weather Mini App:
 
 ## Функциональности
 
-- Команда `/start` в боте:
-  - проверяет корректность `MINIAPP_URL` (только публичный `https://`);
-  - показывает кнопку `Открыть mini app` при валидном URL;
-  - возвращает понятное сообщение, если URL не настроен.
+- Бот (`bot/main.py`, `bot/forecast_args.py`):
+  - `/start` — проверка `MINIAPP_URL` (`https://`), кнопка WebApp или подсказка про `/forecast`, если URL не задан;
+  - `/help` — список команд; `/about` — назначение и Open‑Meteo; `/ping` — ответ `pong`;
+  - `/forecast <город> [1|3|10]` — текстовый прогноз в чате (тот же `OpenMeteoClient`, что у backend);
+  - неизвестная команда с `/` и обычный текст — подсказка про `/help` или `/start`;
+  - при старте вызывается `set_my_commands` (меню команд в Telegram);
+  - команды логируются на `INFO` с `user_id` и `chat_id`, ошибки Open‑Meteo — `WARNING`, прочие при `/forecast` — `exception`.
 - Mini App (`miniapp/index.html`, `miniapp/app.js`, `miniapp/styles.css`):
   - инициализируется через Telegram WebApp SDK, цвета из `themeParams` (в т.ч. после смены темы);
   - форма: автофокус на город, подсказки городов при вводе (`GET /api/geocode`), `Enter` отправляет запрос, trim и валидация длины; срок — ползунок на три положения (1 / 3 / 10 дней);
-  - последние город и период сохраняются в `localStorage` и подставляются при открытии;
+  - последние город и период сохраняются в `localStorage` и подставляются при открытии; до трёх последних успешных городов — чипы под полем ввода;
   - карточки по дням: дата, emoji по `weather_code`, min/max °C, текст погоды с API;
   - skeleton при загрузке, отдельный блок ошибки, кнопка `disabled` на время запроса;
   - favicon-заглушка (data-URL), чтобы не было лишних 404 в логах.
@@ -167,24 +170,27 @@ backend/
   services/
     open_meteo.py        # Клиент Open-Meteo (геокодинг + дневной прогноз)
 bot/
-  main.py                # Telegram-бот (aiogram), команда /start и WebApp-кнопка
+  main.py                # Telegram-бот (aiogram): команды, WebApp, set_my_commands
+  forecast_args.py       # Парсинг /forecast и формат ответа (без токена при импорте)
 miniapp/
   index.html             # UI Mini App
   app.js                 # Форма, /api/forecast, карточки, тема Telegram, localStorage
   styles.css             # Стили интерфейса Mini App
 tests/
   test_api.py            # API smoke-тесты: /health, /api/geocode, /api/forecast
+  test_forecast_args.py  # Парсинг аргументов /forecast для бота
 requirements.txt         # Python-зависимости
 .env.example             # Пример переменных окружения
 ```
 
 ## Тесты
 
-Сейчас в проекте есть API-тесты:
+Сейчас в проекте есть тесты:
 - `test_health_endpoint` проверяет доступность и контракт `/health`;
 - `test_geocode_endpoint_success` / `test_geocode_endpoint_empty` / `test_geocode_query_too_short` — `/api/geocode`;
 - `test_forecast_endpoint_success` проверяет успешный ответ `/api/forecast` с мокнутым клиентом Open-Meteo;
-- `test_forecast_endpoint_validation_error` проверяет валидацию `days` (допустимы только `1/3/10`).
+- `test_forecast_endpoint_validation_error` проверяет валидацию `days` (допустимы только `1/3/10`);
+- `test_forecast_args` — парсинг `/forecast` в `bot/forecast_args.py` (без `BOT_TOKEN`).
 
 Запуск всех тестов:
 
@@ -193,6 +199,6 @@ python -m pytest
 ```
 
 Успешный результат:
-- `6 passed` (или больше, если добавлены новые тесты);
+- `12 passed` (или больше, если добавлены новые тесты);
 - без ошибок импорта и падений endpoint'ов.
 
