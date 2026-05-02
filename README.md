@@ -1,4 +1,4 @@
-# Telegram Weather Mini App - Шаг 1
+# Telegram Weather Mini App
 
 MVP Telegram Weather Mini App:
 - backend на `FastAPI` отдает API и статический Mini App;
@@ -28,8 +28,9 @@ MVP Telegram Weather Mini App:
   - возвращает понятное сообщение, если URL не настроен.
 - Mini App (`miniapp/index.html`, `miniapp/app.js`):
   - инициализируется через Telegram WebApp SDK;
-  - по кнопке `Проверить mini app` вызывает `GET /api/mock`;
-  - отображает ответ API или текст ошибки.
+  - форма: город, выбор периода `1 / 3 / 10` дней, кнопка `Показать прогноз` -> `GET /api/forecast`;
+  - список дней: дата, min/max °C, описание погоды (по коду Open‑Meteo);
+  - дополнительно: кнопка `Проверить mini app` -> `GET /api/mock` (smoke‑тест интеграции).
 - Backend (`backend/app.py`):
   - `GET /health` -> `{"ok": true}`;
   - `GET /api/mock` -> тестовое сообщение;
@@ -127,8 +128,9 @@ curl "http://127.0.0.1:8000/api/forecast?city=Moscow&days=3"
 Проверьте пользовательский сценарий:
 1. Откройте чат с ботом и отправьте `/start`.
 2. Нажмите `Открыть mini app`.
-3. В Mini App нажмите `Проверить mini app`.
-4. Ожидаемый результат: `Здесь скоро появится прогноз погоды, следите за новостями:)`.
+3. Введите город (например `Москва`), выберите `1`, `3` или `10` дней, нажмите `Показать прогноз`.
+4. Должен появиться список строк вида `YYYY-MM-DD: min … max, описание`.
+5. Опционально: `Проверить mini app` -> заглушка `Здесь скоро появится прогноз погоды, следите за новостями:)`.
 
 Проверьте API прогноза:
 - запрос: `GET /api/forecast?city=Moscow&days=3`;
@@ -163,7 +165,7 @@ bot/
   main.py                # Telegram-бот (aiogram), команда /start и WebApp-кнопка
 miniapp/
   index.html             # UI Mini App
-  app.js                 # Логика кнопки и вызова /api/mock
+  app.js                 # Вызов /api/forecast и /api/mock, разбор ошибок API
   styles.css             # Стили интерфейса Mini App
 tests/
   test_api.py            # API smoke-тесты для /health и /api/mock

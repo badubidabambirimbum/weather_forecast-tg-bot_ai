@@ -1,9 +1,7 @@
-/* Базовый reset для предсказуемой верстки во всех webview. */
 * {
   box-sizing: border-box;
 }
 
-/* Основной фон и типографика mini app. */
 body {
   margin: 0;
   font-family: Arial, sans-serif;
@@ -11,28 +9,59 @@ body {
   color: #1f2937;
 }
 
-/* Контейнер страницы с ограничением ширины. */
 .container {
   max-width: 640px;
   margin: 0 auto;
   padding: 16px;
 }
 
-/* Карточка с тестовой кнопкой шага 1. */
 .card {
   background: #ffffff;
   border-radius: 12px;
   padding: 16px;
+  margin-bottom: 16px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05);
 }
 
-/* Подсказка пользователю перед действием. */
-.hint {
-  margin-top: 0;
-  color: #4b5563;
+.card-muted {
+  border: 1px solid #e5e7eb;
+  box-shadow: none;
 }
 
-/* Основная CTA-кнопка для проверки mock endpoint. */
+.card-title {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 1.35rem;
+}
+
+.hint {
+  margin-top: 0;
+  margin-bottom: 12px;
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+label {
+  display: block;
+  margin-top: 12px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 14px;
+}
+
 .btn {
   margin-top: 14px;
   border: 0;
@@ -44,13 +73,21 @@ body {
   cursor: pointer;
 }
 
-/* Состояние hover для десктопной проверки в браузере. */
 .btn:hover {
   background: #1d4ed8;
 }
 
-/* Блок, в котором показываем ответ backend или текст ошибки. */
+.btn-secondary {
+  background: #6b7280;
+}
+
+.btn-secondary:hover {
+  background: #4b5563;
+}
+
 .result {
   margin-top: 12px;
   white-space: pre-wrap;
+  font-size: 0.95rem;
+  line-height: 1.45;
 }

@@ -2,16 +2,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Weather Mini App Mock</title>
+    <title>Прогноз погоды</title>
     <link rel="stylesheet" href="./styles.css" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
     <main class="container">
       <section class="card">
-        <h1>Mini App проверка</h1>
-        <p class="hint">Каркас шага 1: проверяем открытие Mini App и кнопку-заглушку.</p>
-        <button id="mockButton" class="btn" type="button">Проверить mini app</button>
+        <h1>Прогноз погоды</h1>
+        <p class="hint">Данные: Open‑Meteo (без API‑ключа). Укажите город и период.</p>
+
+        <label for="cityInput">Город</label>
+        <input id="cityInput" type="text" placeholder="Например, Москва" autocomplete="off" />
+
+        <label for="daysSelect">Период</label>
+        <select id="daysSelect" aria-label="Период прогноза в днях">
+          <option value="1">1 день</option>
+          <option value="3">3 дня</option>
+          <option value="10">10 дней</option>
+        </select>
+
+        <button id="forecastButton" class="btn" type="button">Показать прогноз</button>
+        <div id="forecastResult" class="result" aria-live="polite"></div>
+      </section>
+
+      <section class="card card-muted">
+        <h2 class="card-title">Проверка интеграции</h2>
+        <p class="hint">Кнопка для smoke‑теста Mini App и backend.</p>
+        <button id="mockButton" class="btn btn-secondary" type="button">Проверить mini app</button>
         <p id="mockResult" class="result" aria-live="polite"></p>
       </section>
     </main>
