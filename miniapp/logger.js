@@ -1,10 +1,9 @@
 /**
- * Клиентские события Mini App: дублирование в console и fire-and-forget на POST /api/events.
+ * Клиентские события Mini App: fire-and-forget на POST /api/events.
  * Ошибки сети игнорируются, UI не ломается. Payload — только строки и целые (см. backend EventRequest).
  *
  * В каждый запрос подмешиваются сведения из Telegram.WebApp.initDataUnsafe.user (если есть).
- * Это данные из клиента без проверки подписи initData на сервере — для ответственной аналитики позже
- * можно добавить проверку initData через BOT_TOKEN на backend.
+ * Backend дополнительно проверяет серверную сессию (создаётся через /api/session после проверки initData).
  */
 (function () {
   "use strict";
@@ -94,9 +93,6 @@
     /* Сначала аргументы вызова, затем поля из Telegram — чтобы tg_user_id не подменяли из app.js */
     const merged = { ...(payload || {}), ...getTelegramUserPayload() };
     const p = normalizePayload(merged);
-    if (typeof console !== "undefined" && console.info) {
-      console.info("[miniapp]", event, p);
-    }
     const bodyObj = { event, payload: p, client_ts_ms: Date.now() };
     let text;
     try {
