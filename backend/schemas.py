@@ -95,3 +95,15 @@ class EventRequest(BaseModel):
                 raise ValueError("payload: недопустимый тип значения")
         return cleaned
 
+
+class TelegramSessionRequest(BaseModel):
+    """Запрос инициализации серверной сессии по подписанному Telegram initData."""
+
+    init_data: str = Field(min_length=1, max_length=8192)
+
+
+class PublicConfigResponse(BaseModel):
+    """Публичные настройки для Mini App (без секретов)."""
+
+    bot_url: str | None = Field(default=None, description="Ссылка на бота, например https://t.me/your_bot")
+
