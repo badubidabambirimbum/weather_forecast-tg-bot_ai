@@ -183,6 +183,9 @@ function renderRecentCitiesChips() {
       hideCitySuggestions();
       scheduleCitySuggest();
       cityInput.focus();
+      if (window.weatherAppLog?.send) {
+        window.weatherAppLog.send("command_hint_used", { source: "recent_chip" });
+      }
     });
     recentCitiesChips.appendChild(btn);
   }
@@ -372,6 +375,9 @@ function applyCitySuggestion() {
   const picked = citySuggestItems[citySuggestActive];
   cityInput.value = picked.name;
   hideCitySuggestions();
+  if (window.weatherAppLog?.send) {
+    window.weatherAppLog.send("command_hint_used", { source: "geocode" });
+  }
 }
 
 /**
@@ -593,6 +599,13 @@ async function submitForecast() {
   const days = getDaysQueryParam();
   const daysNum = parseInt(days, 10);
 
+  if (window.weatherAppLog?.send) {
+    window.weatherAppLog.send("submit_forecast", {
+      days: Number.isFinite(daysNum) ? daysNum : 3,
+      city_len: city.length,
+    });
+  }
+
   forecastSummary.hidden = true;
   forecastCards.innerHTML = "";
   showSkeleton(Number.isFinite(daysNum) ? daysNum : 3);
@@ -609,9 +622,19 @@ async function submitForecast() {
     cityInput.value = resolvedCity;
     persistFormToStorage(resolvedCity, days);
     rememberRecentCity(resolvedCity);
+    const fc = Array.isArray(data.forecast) ? data.forecast : [];
+    if (window.weatherAppLog?.send) {
+      window.weatherAppLog.send("forecast_ok", {
+        days: Number.isFinite(daysNum) ? daysNum : 3,
+        forecast_len: fc.length,
+      });
+    }
   } catch (error) {
     hideSkeleton();
     const msg = error instanceof Error ? error.message : String(error);
+    if (window.weatherAppLog?.send) {
+      window.weatherAppLog.send("forecast_error", { message_len: msg.length });
+    }
     setErrorVisible(`Ошибка: ${msg}`);
     forecastSummary.hidden = true;
     forecastCards.innerHTML = "";
@@ -653,6 +676,13 @@ cityInput.addEventListener("keydown", (e) => {
 restoreFormFromStorage();
 renderRecentCitiesChips();
 syncDaysSliderUi();
+
+if (window.weatherAppLog?.send) {
+  window.weatherAppLog.send("miniapp_ready", {
+    has_tg: tg ? 1 : 0,
+    theme: typeof tg?.colorScheme === "string" ? (tg.colorScheme === "dark" ? 1 : 0) : 0,
+  });
+}
 
 daysSlider.addEventListener("input", syncDaysSliderUi);
 daysSlider.addEventListener("change", syncDaysSliderUi);

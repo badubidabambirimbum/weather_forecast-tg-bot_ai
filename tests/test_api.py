@@ -89,3 +89,37 @@ def test_geocode_query_too_short() -> None:
     client = TestClient(app_module.app)
     response = client.get("/api/geocode", params={"query": "я"})
     assert response.status_code == 422
+
+
+def test_events_endpoint_accepts_known_event() -> None:
+    """POST /api/events принимает известное событие и отвечает 204."""
+    app_module._event_rate_store.clear()
+    client = TestClient(app_module.app)
+    response = client.post(
+        "/api/events",
+        json={
+            "event": "miniapp_ready",
+            "payload": {"has_tg": 1},
+            "client_ts_ms": 1700000000000,
+        },
+    )
+    assert response.status_code == 204
+    assert response.content == b""
+
+
+def test_events_endpoint_rejects_unknown_event() -> None:
+    """Неизвестное имя события отклоняется валидацией."""
+    client = TestClient(app_module.app)
+    response = client.post("/api/events", json={"event": "not_a_real_event", "payload": {}})
+    assert response.status_code == 422
+
+
+def test_events_endpoint_rate_limit_429() -> None:
+    """С 61-го запроса за минуту с того же IP — 429."""
+    app_module._event_rate_store.clear()
+    client = TestClient(app_module.app)
+    body = {"event": "miniapp_ready", "payload": {}}
+    for _ in range(60):
+        assert client.post("/api/events", json=body).status_code == 204
+    assert client.post("/api/events", json=body).status_code == 429
+    app_module._event_rate_store.clear()

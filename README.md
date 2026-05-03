@@ -29,17 +29,19 @@ MVP Telegram Weather Mini App:
   - неизвестная команда с `/` и обычный текст — подсказка про `/help` или `/start`;
   - при старте вызывается `set_my_commands` (меню команд в Telegram);
   - команды логируются на `INFO` с `user_id` и `chat_id`, ошибки Open‑Meteo — `WARNING`, прочие при `/forecast` — `exception`.
-- Mini App (`miniapp/index.html`, `miniapp/app.js`, `miniapp/styles.css`):
+- Mini App (`miniapp/index.html`, `miniapp/app.js`, `miniapp/logger.js`, `miniapp/styles.css`):
   - инициализируется через Telegram WebApp SDK, цвета из `themeParams` (в т.ч. после смены темы);
   - форма: автофокус на город, подсказки городов при вводе (`GET /api/geocode`), `Enter` отправляет запрос, trim и валидация длины; срок — ползунок на три положения (1 / 3 / 10 дней);
   - последние город и период сохраняются в `localStorage` и подставляются при открытии; до трёх последних успешных городов — чипы под полем ввода;
   - карточки по дням: дата, emoji по `weather_code`, min/max °C, текст погоды с API;
   - skeleton при загрузке, отдельный блок ошибки, кнопка `disabled` на время запроса;
-  - favicon-заглушка (data-URL), чтобы не было лишних 404 в логах.
+  - favicon-заглушка (data-URL), чтобы не было лишних 404 в логах;
+  - события UI (`miniapp_ready`, `submit_forecast`, `forecast_ok`, `forecast_error`, `command_hint_used`) — `POST /api/events` через `logger.js` (sendBeacon / fetch keepalive); в payload автоматически подмешиваются `tg_user_id`, имя/username из `initDataUnsafe.user` (подпись `initData` на сервере не проверяется); в логе backend отдельно выводится `tg_user_id`.
 - Backend (`backend/app.py`):
   - `GET /health` -> `{"ok": true}`;
   - `GET /api/geocode?query=<строка>` -> подсказки городов (Open-Meteo Geocoding) для автодополнения;
   - `GET /api/forecast?city=<город>&days=<1|3|10>` -> дневной прогноз;
+  - `POST /api/events` -> `204`, логгер `backend.events` (строка с `event=`, `tg_user_id=`, `payload=`), in-memory rate limit (60/мин на IP);
   - раздача статики Mini App по корневому пути `/`.
 - Слой интеграции с погодным API:
   - `backend/services/open_meteo.py` реализует геокодинг и получение прогноза из Open-Meteo;
@@ -174,7 +176,8 @@ bot/
   forecast_args.py       # Парсинг /forecast и формат ответа (без токена при импорте)
 miniapp/
   index.html             # UI Mini App
-  app.js                 # Форма, /api/forecast, карточки, тема Telegram, localStorage
+  app.js                 # Форма, /api/forecast, события через logger.js
+  logger.js              # Клиентские события -> POST /api/events
   styles.css             # Стили интерфейса Mini App
 tests/
   test_api.py            # API smoke-тесты: /health, /api/geocode, /api/forecast
@@ -188,6 +191,7 @@ requirements.txt         # Python-зависимости
 Сейчас в проекте есть тесты:
 - `test_health_endpoint` проверяет доступность и контракт `/health`;
 - `test_geocode_endpoint_success` / `test_geocode_endpoint_empty` / `test_geocode_query_too_short` — `/api/geocode`;
+- `test_events_endpoint_accepts_known_event` / `test_events_endpoint_rejects_unknown_event` / `test_events_endpoint_rate_limit_429` — `POST /api/events`;
 - `test_forecast_endpoint_success` проверяет успешный ответ `/api/forecast` с мокнутым клиентом Open-Meteo;
 - `test_forecast_endpoint_validation_error` проверяет валидацию `days` (допустимы только `1/3/10`);
 - `test_forecast_args` — парсинг `/forecast` в `bot/forecast_args.py` (без `BOT_TOKEN`).
@@ -199,6 +203,6 @@ python -m pytest
 ```
 
 Успешный результат:
-- `12 passed` (или больше, если добавлены новые тесты);
+- `15 passed` (или больше, если добавлены новые тесты);
 - без ошибок импорта и падений endpoint'ов.
 
