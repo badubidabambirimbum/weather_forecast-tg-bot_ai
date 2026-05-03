@@ -29,6 +29,13 @@ const forecastCards = document.getElementById("forecastCards");
 const citySuggestList = document.getElementById("citySuggestList");
 const recentCitiesRow = document.getElementById("recentCitiesRow");
 const recentCitiesChips = document.getElementById("recentCitiesChips");
+const appBootMessage = document.getElementById("appBootMessage");
+const telegramGate = document.getElementById("telegramGate");
+const mainShell = document.getElementById("mainShell");
+const botLink = document.getElementById("botLink");
+
+/** HttpOnly session cookie: все запросы к нашему API — с учётом credentials. */
+const fetchCreds = { credentials: "include" };
 
 /**
  * Подставляет цвета из Telegram Mini App в CSS-переменные страницы.
@@ -311,7 +318,7 @@ function formatErrorDetail(detail) {
  * @returns {Promise<Record<string, unknown>>}
  */
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, fetchCreds);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(formatErrorDetail(data?.detail));
@@ -432,7 +439,7 @@ async function runCitySuggestQuery(q) {
   citySuggestAbort = new AbortController();
   const { signal } = citySuggestAbort;
   try {
-    const res = await fetch(`/api/geocode?query=${encodeURIComponent(q)}`, { signal });
+    const res = await fetch(`/api/geocode?query=${encodeURIComponent(q)}`, { signal, ...fetchCreds });
     const raw = await res.json().catch(() => ({}));
     if (!res.ok) {
       hideCitySuggestions();
@@ -643,51 +650,160 @@ async function submitForecast() {
   }
 }
 
-cityInput.addEventListener("input", scheduleCitySuggest);
-
-cityInput.addEventListener("blur", () => {
-  window.setTimeout(() => hideCitySuggestions(), 200);
-});
-
-cityInput.addEventListener("keydown", (e) => {
-  const listOpen = !citySuggestList.hidden && citySuggestItems.length > 0;
-  if (e.key === "Escape") {
-    if (listOpen) {
-      e.preventDefault();
-      hideCitySuggestions();
-    }
-    return;
+/**
+ * Публичные настройки с backend (ссылка на бота для экрана ограничения доступа).
+ */
+async function fetchPublicConfigBotUrl() {
+  try {
+    const r = await fetch("/api/public/config", fetchCreds);
+    const data = await r.json().catch(() => ({}));
+    const url = data?.bot_url;
+    return typeof url === "string" && url.trim() ? url.trim() : "";
+  } catch {
+    return "";
   }
-  if (!listOpen) return;
-  if (e.key === "ArrowDown") {
-    e.preventDefault();
-    citySuggestActive = Math.min(citySuggestActive + 1, citySuggestItems.length - 1);
-    syncCitySuggestHighlight();
-  } else if (e.key === "ArrowUp") {
-    e.preventDefault();
-    citySuggestActive = Math.max(citySuggestActive - 1, 0);
-    syncCitySuggestHighlight();
-  } else if (e.key === "Enter") {
-    e.preventDefault();
-    applyCitySuggestion();
-  }
-});
-
-restoreFormFromStorage();
-renderRecentCitiesChips();
-syncDaysSliderUi();
-
-if (window.weatherAppLog?.send) {
-  window.weatherAppLog.send("miniapp_ready", {
-    has_tg: tg ? 1 : 0,
-    theme: typeof tg?.colorScheme === "string" ? (tg.colorScheme === "dark" ? 1 : 0) : 0,
-  });
 }
 
-daysSlider.addEventListener("input", syncDaysSliderUi);
-daysSlider.addEventListener("change", syncDaysSliderUi);
+/**
+ * Устанавливает cookie-сессию по подписанному `Telegram.WebApp.initData`.
+ */
+async function postTelegramSession(initData) {
+  const r = await fetch("/api/session", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ init_data: initData }),
+    ...fetchCreds,
+  });
+  return r.ok;
+}
 
-forecastForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  submitForecast();
-});
+function applyGateBotLink(botUrl) {
+  const href = botUrl && botUrl.length > 0 ? botUrl : "https://t.me/";
+  if (botLink) botLink.setAttribute("href", href);
+}
+
+/**
+ * Ждём появления `Telegram.WebApp.initData`: в части клиентов строка заполняется не в первый тик.
+ * @param {number} maxWaitMs
+ * @param {number} stepMs
+ * @returns {Promise<string>}
+ */
+async function waitForTelegramInitData(maxWaitMs = 5000, stepMs = 50) {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const raw = tg?.initData;
+    const s = typeof raw === "string" ? raw.trim() : "";
+    if (s.length > 0) return s;
+    await new Promise((r) => setTimeout(r, stepMs));
+  }
+  const raw = tg?.initData;
+  return typeof raw === "string" ? raw.trim() : "";
+}
+
+/**
+ * Экран ограничения доступа: основной UI скрыт.
+ * @param {string} botUrl
+ * @param {{ hasTelegramSdk?: boolean }} [options]
+ */
+function showTelegramGate(botUrl, options) {
+  const hasTelegramSdk = options?.hasTelegramSdk === true;
+  if (appBootMessage) appBootMessage.hidden = true;
+  if (mainShell) mainShell.hidden = true;
+  applyGateBotLink(botUrl);
+  const titleEl = document.getElementById("telegramGateTitle");
+  const detailEl = document.getElementById("telegramGateDetail");
+  if (titleEl) {
+    titleEl.textContent = hasTelegramSdk ? "Не удалось подтвердить вход" : "Только из Telegram";
+  }
+  if (detailEl) {
+    detailEl.textContent = hasTelegramSdk
+      ? "Окружение Telegram есть, но нет подписанной строки initData — без неё сервер не может проверить вход. Полностью закройте Mini App и откройте снова из меню бота. Проверьте HTTPS и что URL в @BotFather совпадает с этим сайтом."
+      : "Откройте приложение из чата с ботом (кнопка Mini App). Прямая ссылка в обычном браузере не передаёт initData.";
+  }
+  if (telegramGate) telegramGate.hidden = false;
+}
+
+/**
+ * После успешной `/api/session`: восстановление формы, события, обработчики.
+ */
+function startMainApp() {
+  restoreFormFromStorage();
+  renderRecentCitiesChips();
+  syncDaysSliderUi();
+
+  cityInput.addEventListener("input", scheduleCitySuggest);
+
+  cityInput.addEventListener("blur", () => {
+    window.setTimeout(() => hideCitySuggestions(), 200);
+  });
+
+  cityInput.addEventListener("keydown", (e) => {
+    const listOpen = !citySuggestList.hidden && citySuggestItems.length > 0;
+    if (e.key === "Escape") {
+      if (listOpen) {
+        e.preventDefault();
+        hideCitySuggestions();
+      }
+      return;
+    }
+    if (!listOpen) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      citySuggestActive = Math.min(citySuggestActive + 1, citySuggestItems.length - 1);
+      syncCitySuggestHighlight();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      citySuggestActive = Math.max(citySuggestActive - 1, 0);
+      syncCitySuggestHighlight();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      applyCitySuggestion();
+    }
+  });
+
+  daysSlider.addEventListener("input", syncDaysSliderUi);
+  daysSlider.addEventListener("change", syncDaysSliderUi);
+
+  forecastForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitForecast();
+  });
+
+  if (window.weatherAppLog?.send) {
+    window.weatherAppLog.send("miniapp_ready", {
+      has_tg: tg ? 1 : 0,
+      theme: typeof tg?.colorScheme === "string" ? (tg.colorScheme === "dark" ? 1 : 0) : 0,
+    });
+  }
+}
+
+/**
+ * Старт: без Telegram/initData — заглушка; иначе обмен initData на session cookie, затем UI.
+ */
+async function bootstrapMiniApp() {
+  const cfgBotUrl = await fetchPublicConfigBotUrl();
+  let initData = typeof tg?.initData === "string" ? tg.initData.trim() : "";
+  if (tg && !initData) {
+    initData = await waitForTelegramInitData();
+  }
+
+  if (!tg || !initData) {
+    showTelegramGate(cfgBotUrl, { hasTelegramSdk: !!tg });
+    return;
+  }
+
+  const sessionOk = await postTelegramSession(initData);
+  if (appBootMessage) appBootMessage.hidden = true;
+
+  if (!sessionOk) {
+    showTelegramGate(cfgBotUrl, { hasTelegramSdk: true });
+    return;
+  }
+
+  if (telegramGate) telegramGate.hidden = true;
+  if (mainShell) mainShell.hidden = false;
+
+  startMainApp();
+}
+
+void bootstrapMiniApp();

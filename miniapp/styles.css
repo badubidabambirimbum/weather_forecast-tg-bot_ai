@@ -41,6 +41,22 @@ body {
   padding: 16px;
 }
 
+.app-boot-message {
+  text-align: center;
+  color: var(--app-muted);
+  font-size: 0.95rem;
+  margin: 8px 0 16px;
+}
+
+.telegram-gate .telegram-gate-actions {
+  margin-top: 12px;
+}
+
+.telegram-gate .btn {
+  display: inline-block;
+  text-decoration: none;
+}
+
 /* Заголовок и пояснение — по центру карточки */
 .form-intro {
   text-align: center;

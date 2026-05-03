@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
 import os
 import time
@@ -19,8 +23,11 @@ from backend.schemas import (
     ForecastResponse,
     GeocodeResponse,
     GeocodeSuggestion,
+    PublicConfigResponse,
+    TelegramSessionRequest,
 )
 from backend.services.open_meteo import OpenMeteoClient, OpenMeteoError
+from backend.telegram_webapp import TelegramInitDataError, verify_init_data
 
 load_dotenv()
 
@@ -34,6 +41,8 @@ MINIAPP_DIR = Path(__file__).resolve().parent.parent / "miniapp"
 _event_rate_store: dict[str, list[float]] = {}
 _EVENTS_WINDOW_SEC = 60.0
 _EVENTS_MAX_PER_WINDOW = 60
+_SESSION_COOKIE_NAME = "wf_session"
+_SESSION_MAX_AGE_SEC = 86400
 
 
 def _attach_stderr_handler(log_name: str, level: int) -> None:
@@ -105,9 +114,159 @@ async def log_http_requests(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def miniapp_static_no_store(request: Request, call_next):
+    """Не кешировать HTML/CSS/JS Mini App — Telegram WebView часто держит старый index/app.js без bootstrap."""
+    response = await call_next(request)
+    if request.method != "GET":
+        return response
+    path = request.url.path
+    if path.startswith("/api"):
+        return response
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def miniapp_strip_conditional_request_headers(request: Request, call_next):
+    """Снимает If-None-Match / If-Modified-Since для статики Mini App.
+
+    Иначе Starlette StaticFiles отвечает 304, Telegram WebView остаётся на старом `app.js`
+    (в логах нет `GET /app.js` / нет `POST /api/session`, сразу `POST /api/events` → 401).
+    """
+    if request.method != "GET":
+        return await call_next(request)
+    path = request.url.path
+    if path.startswith("/api"):
+        return await call_next(request)
+    if path == "/" or path.endswith((".html", ".js", ".css")):
+        headers = [
+            (k, v)
+            for k, v in request.scope.get("headers", [])
+            if k.lower() not in (b"if-none-match", b"if-modified-since")
+        ]
+        new_scope = {**request.scope, "headers": headers}
+        request = Request(new_scope)
+    return await call_next(request)
+
+
 def build_open_meteo_client() -> OpenMeteoClient:
     """Создает клиент Open-Meteo (без API-ключа)."""
     return OpenMeteoClient()
+
+
+def _get_required_env(name: str) -> str:
+    """Читает обязательную переменную окружения и валидирует её."""
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is not configured")
+    return value
+
+
+def _get_session_secret() -> str:
+    """Секрет подписи session cookie."""
+    return _get_required_env("SESSION_SECRET")
+
+
+def _get_bot_token() -> str:
+    """Токен Telegram-бота для проверки initData."""
+    return _get_required_env("BOT_TOKEN")
+
+
+def _get_init_data_max_age_seconds() -> int:
+    """Максимальный возраст initData в секундах."""
+    raw = os.getenv("INIT_DATA_MAX_AGE_SEC", str(_SESSION_MAX_AGE_SEC)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("INIT_DATA_MAX_AGE_SEC must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError("INIT_DATA_MAX_AGE_SEC must be positive")
+    return value
+
+
+def _get_cookie_secure_flag() -> bool:
+    """Нужно ли ставить Secure для session cookie."""
+    return os.getenv("COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _get_cookie_samesite() -> str:
+    """Политика SameSite для session cookie."""
+    raw = os.getenv("COOKIE_SAMESITE", "lax").strip().lower()
+    if raw in {"lax", "strict", "none"}:
+        return raw
+    raise RuntimeError("COOKIE_SAMESITE must be one of: lax, strict, none")
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(raw: str) -> bytes:
+    pad_len = (4 - len(raw) % 4) % 4
+    return base64.urlsafe_b64decode(raw + ("=" * pad_len))
+
+
+def _sign_session_payload(payload_b64: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _build_session_token(*, user_id: int, auth_date: int, username: str | None) -> str:
+    """Создаёт подписанный токен для HttpOnly cookie."""
+    now = int(time.time())
+    exp = now + _SESSION_MAX_AGE_SEC
+    payload_obj = {"uid": user_id, "auth_date": auth_date, "exp": exp}
+    if username:
+        payload_obj["username"] = username
+    payload_json = json.dumps(payload_obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    payload_b64 = _b64url_encode(payload_json)
+    signature = _sign_session_payload(payload_b64, _get_session_secret())
+    return f"{payload_b64}.{signature}"
+
+
+def _verify_session_token(token: str) -> dict[str, int | str]:
+    """Проверяет подпись и срок действия session cookie."""
+    try:
+        payload_b64, sig = token.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
+    expected_sig = _sign_session_payload(payload_b64, _get_session_secret())
+    if not hmac.compare_digest(sig, expected_sig):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        payload_raw = _b64url_decode(payload_b64)
+        payload = json.loads(payload_raw.decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - защитный путь для битого токена
+        raise HTTPException(status_code=401, detail="Unauthorized") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    uid = payload.get("uid")
+    exp = payload.get("exp")
+    auth_date = payload.get("auth_date")
+    if not isinstance(uid, int) or isinstance(uid, bool):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not isinstance(exp, int) or not isinstance(auth_date, int):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if exp < int(time.time()):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    out: dict[str, int | str] = {"uid": uid, "exp": exp, "auth_date": auth_date}
+    username = payload.get("username")
+    if isinstance(username, str):
+        out["username"] = username
+    return out
+
+
+def _require_telegram_session(request: Request) -> dict[str, int | str]:
+    """Извлекает и проверяет user-контекст из session cookie."""
+    token = request.cookies.get(_SESSION_COOKIE_NAME)
+    if not token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return _verify_session_token(token)
 
 
 def _client_ip_for_events(request: Request) -> str:
@@ -135,15 +294,15 @@ def _enforce_events_rate_limit(request: Request) -> None:
 
 @app.post("/api/events", status_code=204)
 async def post_client_event(
+    session: Annotated[dict[str, int | str], Depends(_require_telegram_session)],
     _rate: Annotated[None, Depends(_enforce_events_rate_limit)],
     body: EventRequest,
 ) -> Response:
     """Принимает события аналитики из Mini App; пишет в лог, без хранения PII в ответе."""
-    tg_uid = body.payload.get("tg_user_id")
     events_logger.info(
         "event=%s tg_user_id=%s payload=%s client_ts_ms=%s",
         body.event,
-        tg_uid,
+        session["uid"],
         body.payload,
         body.client_ts_ms,
     )
@@ -156,8 +315,63 @@ async def healthcheck() -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.get("/api/public/config", response_model=PublicConfigResponse)
+async def public_config() -> PublicConfigResponse:
+    """Публичная конфигурация для Mini App (ссылка на бота для экрана «только Telegram»)."""
+    raw = os.getenv("BOT_URL", "").strip()
+    return PublicConfigResponse(bot_url=raw or None)
+
+
+@app.post("/api/session", status_code=204)
+async def create_telegram_session(
+    body: TelegramSessionRequest,
+    request: Request,
+    response: Response,
+) -> Response:
+    """Проверяет initData и выставляет подписанную HttpOnly session cookie."""
+    try:
+        verified = verify_init_data(
+            body.init_data,
+            bot_token=_get_bot_token(),
+            max_age_seconds=_get_init_data_max_age_seconds(),
+        )
+    except TelegramInitDataError as exc:
+        raise HTTPException(status_code=401, detail="Invalid Telegram init data") from exc
+    except RuntimeError as exc:
+        logger.error("Ошибка конфигурации /api/session: %s", exc)
+        raise HTTPException(status_code=500, detail="Server auth config error") from exc
+
+    if verified.user is None:
+        raise HTTPException(status_code=401, detail="Telegram user is missing")
+
+    token = _build_session_token(
+        user_id=verified.user.id,
+        auth_date=verified.auth_date,
+        username=verified.user.username,
+    )
+    cookie_samesite = _get_cookie_samesite()
+    cookie_secure = _get_cookie_secure_flag()
+    if cookie_samesite == "none" and not cookie_secure:
+        # Современные браузеры отвергнут SameSite=None без Secure.
+        cookie_secure = True
+    response.set_cookie(
+        key=_SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=cookie_secure,
+        samesite=cookie_samesite,
+        max_age=_SESSION_MAX_AGE_SEC,
+        path="/",
+    )
+    response.status_code = 204
+    return response
+
+
 @app.get("/api/geocode", response_model=GeocodeResponse)
-async def geocode_suggest(query: str = Query(..., min_length=2, max_length=80)) -> GeocodeResponse:
+async def geocode_suggest(
+    _session: Annotated[dict[str, int | str], Depends(_require_telegram_session)],
+    query: str = Query(..., min_length=2, max_length=80),
+) -> GeocodeResponse:
     """Подсказки городов для автодополнения (Open-Meteo Geocoding, без API-ключа)."""
     try:
         client = build_open_meteo_client()
@@ -180,6 +394,7 @@ async def geocode_suggest(query: str = Query(..., min_length=2, max_length=80)) 
 
 @app.get("/api/forecast", response_model=ForecastResponse)
 async def get_forecast(
+    _session: Annotated[dict[str, int | str], Depends(_require_telegram_session)],
     city: str = Query(..., min_length=2, max_length=100),
     days: int = Query(...),
 ) -> ForecastResponse:

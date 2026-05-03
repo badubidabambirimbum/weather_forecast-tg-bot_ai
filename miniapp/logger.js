@@ -19,15 +19,33 @@
    * Поля пользователя Telegram из WebApp SDK (только внутри Telegram).
    * @returns {Record<string, string | number>}
    */
+  /**
+   * Telegram может отдавать user.id как number или как строку из JSON (особенно при парсинге initData).
+   * @param {unknown} raw
+   * @returns {number | undefined}
+   */
+  function normalizeTgUserId(raw) {
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      const id = Math.floor(raw);
+      if (Math.abs(id) <= MAX_INT_ABS) return id;
+      return undefined;
+    }
+    if (typeof raw === "string" && raw.trim()) {
+      const s = raw.trim();
+      if (!/^-?\d+$/.test(s)) return undefined;
+      const id = parseInt(s, 10);
+      if (Number.isFinite(id) && Math.abs(id) <= MAX_INT_ABS) return id;
+    }
+    return undefined;
+  }
+
   function getTelegramUserPayload() {
     const u = window.Telegram?.WebApp?.initDataUnsafe?.user;
     if (!u || typeof u !== "object") return {};
     /** @type {Record<string, string | number>} */
     const out = {};
-    if (typeof u.id === "number" && Number.isFinite(u.id)) {
-      const id = Math.floor(u.id);
-      if (Math.abs(id) <= MAX_INT_ABS) out.tg_user_id = id;
-    }
+    const uid = normalizeTgUserId(u.id);
+    if (uid !== undefined) out.tg_user_id = uid;
     if (typeof u.username === "string" && u.username.trim()) {
       out.tg_username = u.username.trim().slice(0, 128);
     }
@@ -87,19 +105,12 @@
       return;
     }
     try {
-      if (typeof navigator !== "undefined" && navigator.sendBeacon) {
-        const blob = new Blob([text], { type: "application/json" });
-        if (navigator.sendBeacon(ENDPOINT, blob)) return;
-      }
-    } catch {
-      /* игнорируем */
-    }
-    try {
       fetch(ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: text,
         keepalive: true,
+        credentials: "include",
       }).catch(() => {});
     } catch {
       /* игнорируем */

@@ -14,7 +14,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import BotCommand, KeyboardButton, Message, ReplyKeyboardMarkup, WebAppInfo
+from aiogram.types import BotCommand, MenuButtonWebApp, Message, ReplyKeyboardRemove, WebAppInfo
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
@@ -68,18 +68,13 @@ def resolve_miniapp_url(raw_url: str) -> str | None:
     return normalized
 
 
-def webapp_keyboard(miniapp_url: str) -> ReplyKeyboardMarkup:
-    """Создает клавиатуру с кнопкой открытия Telegram Mini App."""
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [
-                KeyboardButton(
-                    text="Открыть mini app",
-                    web_app=WebAppInfo(url=miniapp_url),
-                )
-            ]
-        ],
-        resize_keyboard=True,
+async def setup_menu_button(bot: Bot, miniapp_url: str) -> None:
+    """Настраивает кнопку слева от поля ввода (Menu Button) для запуска Mini App."""
+    await bot.set_chat_menu_button(
+        menu_button=MenuButtonWebApp(
+            text="Открыть Mini App",
+            web_app=WebAppInfo(url=miniapp_url),
+        )
     )
 
 
@@ -98,7 +93,7 @@ async def setup_bot_commands(bot: Bot) -> None:
 
 @dp.message(CommandStart())
 async def handle_start(message: Message) -> None:
-    """Отправляет пользователю кнопку для запуска Mini App."""
+    """Подсказывает, как открыть Mini App через Menu Button."""
     _log_command_context(message, "Команда /start")
     miniapp_url = resolve_miniapp_url(MINIAPP_URL)
     if miniapp_url is None:
@@ -110,14 +105,15 @@ async def handle_start(message: Message) -> None:
         )
         await message.answer(
             "Mini App URL пока не настроен. Задайте публичный HTTPS URL в MINIAPP_URL и перезапустите бота.\n"
-            "Текстовый прогноз доступен: /forecast <город> [1|3|10]"
+            "Текстовый прогноз доступен: /forecast <город> [1|3|10]",
+            reply_markup=ReplyKeyboardRemove(),
         )
         return
 
     await message.answer(
-        "Нажмите кнопку ниже, чтобы открыть Mini App и запросить прогноз.\n"
+        "Откройте Mini App через кнопку слева от поля ввода (Menu Button).\n"
         "Или запросите прогноз здесь: /forecast <город> [1|3|10]",
-        reply_markup=webapp_keyboard(miniapp_url),
+        reply_markup=ReplyKeyboardRemove(),
     )
 
 
@@ -247,6 +243,12 @@ async def main() -> None:
     bot = Bot(token=BOT_TOKEN)
     try:
         await setup_bot_commands(bot)
+        miniapp_url = resolve_miniapp_url(MINIAPP_URL)
+        if miniapp_url:
+            await setup_menu_button(bot, miniapp_url)
+            logger.info("Menu Button Mini App включен")
+        else:
+            logger.warning("Menu Button Mini App не включен: MINIAPP_URL невалидный или не HTTPS")
         await dp.start_polling(bot, drop_pending_updates=True)
     except Exception:
         logger.exception("Ошибка во время работы polling")
