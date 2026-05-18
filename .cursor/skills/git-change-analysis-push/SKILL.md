@@ -140,9 +140,9 @@ feat(webapp): добавить отображение ошибки провер�
 Ускоряет диагностику проблем с туннелем и Telegram-контекстом.
 ```
 
-## Связанные skills
+## Связанный субагент
 
-- Делегирование этого workflow дочернему агенту (Task + shell): см. `.cursor/skills/git-change-subagent-push/SKILL.md`.
+- Делегирование этого workflow: субагент **`git-change-push`** — `.cursor/agents/git-change-push.md` (вызов: «используй субагента git-change-push»).
 
 ## Guardrails
 
