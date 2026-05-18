@@ -4,23 +4,29 @@ overview: Очистить legacy mock-функционал, улучшить UI
 todos:
   - id: cleanup-mock
     content: Удалить mock-карточку, /api/mock, test_mock_endpoint и упоминания в README/боте
-    status: pending
+    status: completed
   - id: miniapp-ui
     content: "Новый UI Mini App: блочный layout, ползунок 1/3/10, выровненный вывод температуры, skeleton, тема Telegram, localStorage, favicon"
-    status: pending
+    status: completed
   - id: bot-commands
     content: Добавить /help, /about, /ping, /forecast и set_my_commands
-    status: pending
+    status: completed
   - id: frontend-logging
     content: Клиентский logger.js, POST /api/events + pydantic-схема и rate-limit, тесты
-    status: pending
+    status: completed
   - id: shared-config
     content: Общий config/logging, отключить дубль ассесс-лога, pytest.ini, robots.txt, обновить .env.example
-    status: pending
+    status: completed
 isProject: false
 ---
 
 # Улучшения приложения: очистка, UI, команды бота, логирование фронтенда
+
+## Статус выполнения
+
+- Все пункты этого плана выполнены и смержены в `master`.
+- В процессе реализации scope был расширен: добавлена серверная верификация Telegram `initData`, endpoint `POST /api/session`, защита API через session cookie, экран «только из Telegram» и запуск Mini App через `MenuButtonWebApp`.
+- Текущий план носит статус исторического отчета; для новых задач рекомендуется отдельный новый план.
 
 ## Обзор
 
