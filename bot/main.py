@@ -18,6 +18,12 @@ from aiogram.types import BotCommand, MenuButtonWebApp, Message, ReplyKeyboardRe
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
+from backend.db.engine import check_connection, dispose_engine, init_engine, is_engine_initialized
+from backend.db.repository import (
+    record_forecast_request_safe,
+    upsert_user_safe,
+    user_profile_from_aiogram,
+)
 from backend.schemas import ForecastQuery
 from backend.services.open_meteo import OpenMeteoClient, OpenMeteoError
 from bot.forecast_args import format_forecast_text, parse_forecast_args
@@ -37,8 +43,48 @@ def get_required_env(name: str) -> str:
 
 BOT_TOKEN = get_required_env("BOT_TOKEN")
 MINIAPP_URL = os.getenv("MINIAPP_URL", "").strip()
+_SERVER_ERROR_PUBLIC = "Unexpected server error"
+_FORECAST_VALIDATION_MSG = (
+    "Некорректные параметры: город — от 2 до 100 символов, дни только 1, 3 или 10."
+)
 
 dp = Dispatcher()
+
+
+def _is_database_configured() -> bool:
+    """True, если задан DATABASE_URL (общий с backend)."""
+    return bool(os.getenv("DATABASE_URL", "").strip())
+
+
+async def _init_bot_database() -> None:
+    """Подключает PostgreSQL в процессе бота (отдельно от uvicorn)."""
+    if not _is_database_configured():
+        logger.warning("DATABASE_URL не задан — бот не пишет в PostgreSQL")
+        return
+    init_engine()
+    if not await check_connection():
+        raise RuntimeError("Не удалось подключиться к PostgreSQL (DATABASE_URL)")
+    logger.info("PostgreSQL: подключение установлено (бот)")
+
+
+async def _touch_user(message: Message) -> int | None:
+    """Upsert профиля из message.from_user; возвращает telegram_user_id или None."""
+    user = message.from_user
+    if user is None:
+        return None
+    try:
+        profile = user_profile_from_aiogram(user)
+    except ValueError:
+        logger.warning("Не удалось разобрать from_user для записи в БД")
+        return None
+    await upsert_user_safe(profile, source="bot")
+    return profile.telegram_user_id
+
+
+async def _log_and_touch_user(message: Message, label: str) -> int | None:
+    """Лог команды и upsert пользователя в БД."""
+    _log_command_context(message, label)
+    return await _touch_user(message)
 
 
 def _log_command_context(message: Message, label: str) -> None:
@@ -94,7 +140,7 @@ async def setup_bot_commands(bot: Bot) -> None:
 @dp.message(CommandStart())
 async def handle_start(message: Message) -> None:
     """Подсказывает, как открыть Mini App через Menu Button."""
-    _log_command_context(message, "Команда /start")
+    await _log_and_touch_user(message, "Команда /start")
     miniapp_url = resolve_miniapp_url(MINIAPP_URL)
     if miniapp_url is None:
         parsed = urlparse(MINIAPP_URL.strip()) if MINIAPP_URL else None
@@ -120,7 +166,7 @@ async def handle_start(message: Message) -> None:
 @dp.message(Command("help"))
 async def handle_help(message: Message) -> None:
     """Краткий список команд бота."""
-    _log_command_context(message, "Команда /help")
+    await _log_and_touch_user(message, "Команда /help")
     text = (
         "Доступные команды:\n"
         "/start — открыть Mini App (кнопка WebApp)\n"
@@ -135,7 +181,7 @@ async def handle_help(message: Message) -> None:
 @dp.message(Command("about"))
 async def handle_about(message: Message) -> None:
     """Назначение бота и источник данных."""
-    _log_command_context(message, "Команда /about")
+    await _log_and_touch_user(message, "Команда /about")
     await message.answer(
         "Бот показывает прогноз погоды через Open‑Meteo (без отдельного API‑ключа).\n"
         "Можно открыть Mini App (/start) или получить краткий прогноз командой /forecast."
@@ -145,7 +191,7 @@ async def handle_about(message: Message) -> None:
 @dp.message(Command("ping"))
 async def handle_ping(message: Message) -> None:
     """Минимальный health-check: ответ «pong»."""
-    _log_command_context(message, "Команда /ping")
+    await _log_and_touch_user(message, "Команда /ping")
     await message.answer("pong")
 
 
@@ -164,6 +210,9 @@ async def handle_forecast(message: Message, command: CommandObject) -> None:
         return
 
     city, days = parsed
+    telegram_user_id = await _touch_user(message)
+    resolved_city: str | None = None
+
     try:
         ForecastQuery(city=city, days=days)
     except ValidationError:
@@ -172,9 +221,16 @@ async def handle_forecast(message: Message, command: CommandObject) -> None:
             message.from_user.id if message.from_user else None,
             message.chat.id if message.chat else None,
         )
-        await message.answer(
-            "Некорректные параметры: город — от 2 до 100 символов, дни только 1, 3 или 10."
-        )
+        if telegram_user_id is not None:
+            await record_forecast_request_safe(
+                telegram_user_id=telegram_user_id,
+                source="bot",
+                query_city=city,
+                days=days,
+                status="validation_error",
+                error_detail=_FORECAST_VALIDATION_MSG,
+            )
+        await message.answer(_FORECAST_VALIDATION_MSG)
         return
 
     client = OpenMeteoClient()
@@ -188,6 +244,16 @@ async def handle_forecast(message: Message, command: CommandObject) -> None:
             message.chat.id if message.chat else None,
             exc,
         )
+        if telegram_user_id is not None:
+            await record_forecast_request_safe(
+                telegram_user_id=telegram_user_id,
+                source="bot",
+                query_city=city,
+                days=days,
+                status="open_meteo_error",
+                resolved_city=resolved_city,
+                error_detail=str(exc),
+            )
         await message.answer(str(exc) or "Не удалось получить прогноз.")
         return
     except Exception:
@@ -196,9 +262,28 @@ async def handle_forecast(message: Message, command: CommandObject) -> None:
             message.from_user.id if message.from_user else None,
             message.chat.id if message.chat else None,
         )
+        if telegram_user_id is not None:
+            await record_forecast_request_safe(
+                telegram_user_id=telegram_user_id,
+                source="bot",
+                query_city=city,
+                days=days,
+                status="server_error",
+                resolved_city=resolved_city,
+                error_detail=_SERVER_ERROR_PUBLIC,
+            )
         await message.answer("Внутренняя ошибка. Попробуйте позже.")
         return
 
+    if telegram_user_id is not None:
+        await record_forecast_request_safe(
+            telegram_user_id=telegram_user_id,
+            source="bot",
+            query_city=city,
+            days=days,
+            status="success",
+            resolved_city=resolved_city,
+        )
     text = format_forecast_text(resolved_city, days, points)
     await message.answer(text)
 
@@ -212,7 +297,7 @@ async def handle_unknown_command(message: Message) -> None:
     if not message.text:
         return
     cmd = message.text.split()[0].split("@")[0].lower()
-    _log_command_context(message, f"Неизвестная команда {cmd}")
+    await _log_and_touch_user(message, f"Неизвестная команда {cmd}")
     await message.answer(
         "Неизвестная команда. Список: /help\n"
         "Прогноз в удобном виде — /start (Mini App) или /forecast <город>."
@@ -231,6 +316,7 @@ async def handle_plain_text(message: Message) -> None:
         len(text),
         preview,
     )
+    await _touch_user(message)
     await message.answer(
         "Напишите команду, например /help или /forecast Москва.\n"
         "Или откройте Mini App: /start"
@@ -242,6 +328,7 @@ async def main() -> None:
     logger.info("Запуск Telegram-бота (long polling)")
     bot = Bot(token=BOT_TOKEN)
     try:
+        await _init_bot_database()
         await setup_bot_commands(bot)
         miniapp_url = resolve_miniapp_url(MINIAPP_URL)
         if miniapp_url:
@@ -254,6 +341,8 @@ async def main() -> None:
         logger.exception("Ошибка во время работы polling")
         raise
     finally:
+        if is_engine_initialized():
+            await dispose_engine()
         await bot.session.close()
         logger.info("Polling остановлен, HTTP-сессия бота закрыта")
 

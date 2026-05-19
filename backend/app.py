@@ -26,6 +26,12 @@ from backend.schemas import (
     PublicConfigResponse,
     TelegramSessionRequest,
 )
+from backend.db.engine import check_connection, dispose_engine, init_engine, is_engine_initialized
+from backend.db.repository import (
+    record_forecast_request_safe,
+    upsert_user_safe,
+    user_profile_from_telegram,
+)
 from backend.services.open_meteo import OpenMeteoClient, OpenMeteoError
 from backend.telegram_webapp import TelegramInitDataError, verify_init_data
 
@@ -43,6 +49,7 @@ _EVENTS_WINDOW_SEC = 60.0
 _EVENTS_MAX_PER_WINDOW = 60
 _SESSION_COOKIE_NAME = "wf_session"
 _SESSION_MAX_AGE_SEC = 86400
+_SERVER_ERROR_PUBLIC = "Unexpected server error"
 
 
 def _attach_stderr_handler(log_name: str, level: int) -> None:
@@ -61,9 +68,14 @@ def _attach_stderr_handler(log_name: str, level: int) -> None:
     lg.propagate = False
 
 
+def _is_database_configured() -> bool:
+    """True, если задан DATABASE_URL (PostgreSQL)."""
+    return bool(os.getenv("DATABASE_URL", "").strip())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Настройка логирования пакета backend при старте приложения (uvicorn)."""
+    """Логирование, подключение к PostgreSQL (если настроено), остановка engine."""
     level_name = os.getenv("LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
     for log_name in (
@@ -72,14 +84,26 @@ async def lifespan(_app: FastAPI):
         "backend.services",
         "backend.services.open_meteo",
         "backend.events",
+        "backend.db",
     ):
         logging.getLogger(log_name).setLevel(level)
     # Явный вывод в консоль для ключевых логгеров (иначе INFO «теряется» при запуске через uvicorn).
     _attach_stderr_handler("backend.app", level)
     _attach_stderr_handler("backend.events", level)
+    if _is_database_configured():
+        init_engine()
+        if not await check_connection():
+            raise RuntimeError("Не удалось подключиться к PostgreSQL (DATABASE_URL)")
+        logger.info("PostgreSQL: подключение установлено")
+    else:
+        logger.warning("DATABASE_URL не задан — запись профиля и истории прогнозов отключена")
     logger.info("Backend запущен: LOG_LEVEL=%s", level_name)
-    yield
-    logger.info("Backend останавливается")
+    try:
+        yield
+    finally:
+        if is_engine_initialized():
+            await dispose_engine()
+        logger.info("Backend останавливается")
 
 
 # Инициализация backend приложения.
@@ -311,8 +335,11 @@ async def post_client_event(
 
 @app.get("/health")
 async def healthcheck() -> dict[str, bool]:
-    """Проверка, что backend запущен и отвечает."""
-    return {"ok": True}
+    """Проверка, что backend запущен; при настроенной БД — также db."""
+    result: dict[str, bool] = {"ok": True}
+    if is_engine_initialized():
+        result["db"] = await check_connection()
+    return result
 
 
 @app.get("/api/public/config", response_model=PublicConfigResponse)
@@ -343,6 +370,8 @@ async def create_telegram_session(
 
     if verified.user is None:
         raise HTTPException(status_code=401, detail="Telegram user is missing")
+
+    await upsert_user_safe(user_profile_from_telegram(verified.user), source="miniapp")
 
     token = _build_session_token(
         user_id=verified.user.id,
@@ -394,11 +423,13 @@ async def geocode_suggest(
 
 @app.get("/api/forecast", response_model=ForecastResponse)
 async def get_forecast(
-    _session: Annotated[dict[str, int | str], Depends(_require_telegram_session)],
+    session: Annotated[dict[str, int | str], Depends(_require_telegram_session)],
     city: str = Query(..., min_length=2, max_length=100),
     days: int = Query(...),
 ) -> ForecastResponse:
     """Возвращает прогноз на 1/3/10 дней с min/max температурой."""
+    telegram_user_id = int(session["uid"])
+    resolved_city: str | None = None
     try:
         query = ForecastQuery(city=city, days=days)
         client = build_open_meteo_client()
@@ -411,6 +442,15 @@ async def get_forecast(
             len(city),
             exc,
         )
+        await record_forecast_request_safe(
+            telegram_user_id=telegram_user_id,
+            source="miniapp",
+            query_city=city,
+            days=days,
+            status="validation_error",
+            http_status=422,
+            error_detail=str(exc),
+        )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OpenMeteoError as exc:
         logger.warning(
@@ -419,6 +459,16 @@ async def get_forecast(
             len(city),
             exc,
         )
+        await record_forecast_request_safe(
+            telegram_user_id=telegram_user_id,
+            source="miniapp",
+            query_city=city,
+            days=days,
+            status="open_meteo_error",
+            resolved_city=resolved_city,
+            http_status=400,
+            error_detail=str(exc),
+        )
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception(
@@ -426,8 +476,27 @@ async def get_forecast(
             days,
             len(city),
         )
-        raise HTTPException(status_code=500, detail="Unexpected server error") from exc
+        await record_forecast_request_safe(
+            telegram_user_id=telegram_user_id,
+            source="miniapp",
+            query_city=city,
+            days=days,
+            status="server_error",
+            resolved_city=resolved_city,
+            http_status=500,
+            error_detail=_SERVER_ERROR_PUBLIC,
+        )
+        raise HTTPException(status_code=500, detail=_SERVER_ERROR_PUBLIC) from exc
 
+    await record_forecast_request_safe(
+        telegram_user_id=telegram_user_id,
+        source="miniapp",
+        query_city=city,
+        days=query.days,
+        status="success",
+        resolved_city=resolved_city,
+        http_status=200,
+    )
     logger.info(
         "GET /api/forecast: ok days=%s resolved_city=%s points=%s",
         query.days,
