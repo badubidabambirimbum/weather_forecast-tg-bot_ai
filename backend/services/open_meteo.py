@@ -46,6 +46,14 @@ class OpenMeteoClient:
         self.geo_url = "https://geocoding-api.open-meteo.com/v1/search"
         self.forecast_url = "https://api.open-meteo.com/v1/forecast"
 
+    def _http_client(self) -> httpx.AsyncClient:
+        """HTTPS-клиент к Open-Meteo.
+
+        trust_env=False: не подхватывать SSL_CERT_FILE из conda, если файл отсутствует
+        (иначе FileNotFoundError при create_ssl_context на Windows).
+        """
+        return httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False)
+
     async def get_city_coordinates(self, city: str) -> tuple[float, float, str]:
         """Ищет координаты города через Open-Meteo geocoding API."""
         params = {"name": city, "count": 1, "language": "ru", "format": "json"}
@@ -54,7 +62,7 @@ class OpenMeteoClient:
             len(city),
         )
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with self._http_client() as client:
                 response = await client.get(self.geo_url, params=params)
         except httpx.RequestError:
             logger.exception("Open-Meteo geocoding: сетевая ошибка запроса")
@@ -85,7 +93,7 @@ class OpenMeteoClient:
         params = {"name": trimmed, "count": limit, "language": "ru", "format": "json"}
         logger.debug("Open-Meteo geocoding suggest: query_len=%s limit=%s", len(trimmed), limit)
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with self._http_client() as client:
                 response = await client.get(self.geo_url, params=params)
         except httpx.RequestError:
             logger.exception("Open-Meteo geocoding suggest: сетевая ошибка запроса")
@@ -134,7 +142,7 @@ class OpenMeteoClient:
             lon,
         )
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with self._http_client() as client:
                 response = await client.get(self.forecast_url, params=params)
         except httpx.RequestError:
             logger.exception("Open-Meteo forecast: сетевая ошибка запроса")
