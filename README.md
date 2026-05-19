@@ -4,7 +4,8 @@ MVP Telegram Weather Mini App:
 - backend на `FastAPI` отдает API и статический Mini App;
 - Telegram-бот на `aiogram`: WebApp, команды `/help`, `/about`, `/ping`, `/forecast`, меню команд;
 - фронтенд Mini App сначала создает серверную сессию через `POST /api/session`, затем запрашивает прогноз;
-- backend предоставляет API прогноза погоды через Open-Meteo.
+- backend предоставляет API прогноза погоды через Open-Meteo;
+- PostgreSQL (Docker): профиль пользователя и история попыток прогноза (успех и ошибки) из Mini App и `/forecast`.
 
 ## Содержание
 
@@ -18,6 +19,7 @@ MVP Telegram Weather Mini App:
   - [6) Базовая проверка, что все поднялось](#6-базовая-проверка-что-все-поднялось)
   - [Быстрый запуск (кратко)](#быстрый-запуск-кратко)
 - [Структура проекта](#структура-проекта)
+- [База данных](#база-данных)
 - [Тесты](#тесты)
 
 ## Функциональности
@@ -28,7 +30,8 @@ MVP Telegram Weather Mini App:
   - `/forecast <город> [1|3|10]` — текстовый прогноз в чате (тот же `OpenMeteoClient`, что у backend);
   - неизвестная команда с `/` и обычный текст — подсказка про `/help` или `/start`;
   - при старте вызывается `set_my_commands` (меню команд в Telegram);
-  - команды логируются на `INFO` с `user_id` и `chat_id`, ошибки Open‑Meteo — `WARNING`, прочие при `/forecast` — `exception`.
+  - команды логируются на `INFO` с `user_id` и `chat_id`, ошибки Open‑Meteo — `WARNING`, прочие при `/forecast` — `exception`;
+  - при заданном `DATABASE_URL` upsert профиля в PostgreSQL на командах и запись попыток `/forecast` (`source=bot`).
 - Mini App (`miniapp/index.html`, `miniapp/app.js`, `miniapp/logger.js`, `miniapp/styles.css`):
   - инициализируется через Telegram WebApp SDK, цвета из `themeParams` (в т.ч. после смены темы);
   - при старте ждёт `Telegram.WebApp.initData`, отправляет его на `POST /api/session` и работает только после успешной серверной валидации;
@@ -40,11 +43,11 @@ MVP Telegram Weather Mini App:
   - favicon-заглушка (data-URL), чтобы не было лишних 404 в логах;
   - события UI (`miniapp_ready`, `submit_forecast`, `forecast_ok`, `forecast_error`, `command_hint_used`) — `POST /api/events` через `logger.js`; в payload автоматически подмешиваются поля пользователя из `initDataUnsafe.user`, а сервер в логах использует `tg_user_id` из проверенной session cookie.
 - Backend (`backend/app.py`):
-  - `GET /health` -> `{"ok": true}`;
-  - `POST /api/session` -> проверка подписи Telegram `initData` + установка подписанной `HttpOnly` cookie `wf_session`;
+  - `GET /health` -> `{"ok": true}`; при подключённой БД также `"db": true`;
+  - `POST /api/session` -> проверка подписи Telegram `initData`, upsert профиля в БД, установка `HttpOnly` cookie `wf_session`;
   - `GET /api/public/config` -> публичные настройки (`bot_url`) для экрана ограничения доступа;
   - `GET /api/geocode?query=<строка>` -> подсказки городов (Open-Meteo Geocoding), только при валидной session cookie;
-  - `GET /api/forecast?city=<город>&days=<1|3|10>` -> дневной прогноз, только при валидной session cookie;
+  - `GET /api/forecast?city=<город>&days=<1|3|10>` -> дневной прогноз и запись попытки в БД (`success` / ошибки), только при валидной session cookie;
   - `POST /api/events` -> `204`, логгер `backend.events` (строка с `event=`, `tg_user_id=`, `payload=`), in-memory rate limit (60/мин на IP), только при валидной session cookie;
   - раздача статики Mini App по корневому пути `/`.
 - Слой интеграции с погодным API:
@@ -55,7 +58,8 @@ MVP Telegram Weather Mini App:
 
 ### 1) Prerequisites
 
-- Python 3.10+.
+- Python 3.10+ (рекомендуется conda-окружение `project-env`).
+- Docker — для PostgreSQL локально.
 - Telegram-бот с токеном от `@BotFather`.
 - Публичный `https://` URL (например, через туннель), доступный из Telegram.
 - Доступ в интернет для вызова Open-Meteo API.
@@ -63,6 +67,7 @@ MVP Telegram Weather Mini App:
 ### 2) Установка зависимостей
 
 ```bash
+conda activate project-env
 pip install -r requirements.txt
 ```
 
@@ -79,6 +84,8 @@ copy .env.example .env
 - `SESSION_SECRET` - секрет подписи session cookie (длинная случайная строка);
 - `BOT_URL` - ссылка на бота (`https://t.me/<bot_username>`) для fallback-экрана в Mini App;
 - `MINIAPP_URL` - публичный `https://` URL backend (без локальных `http://localhost`).
+- `DATABASE_URL` - PostgreSQL для профиля и истории прогнозов (`postgresql+asyncpg://...`, см. `.env.example`);
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` - для `docker compose` (должны совпадать с паролем в `DATABASE_URL`).
 
 Опционально для backend (уровень логов пакета `backend` при запуске через uvicorn):
 
@@ -88,6 +95,13 @@ copy .env.example .env
 - `INIT_DATA_MAX_AGE_SEC` - максимальный возраст Telegram `initData` в секундах.
 
 ### 4) Запуск компонентов
+
+PostgreSQL и миграции (один раз или после смены схемы):
+
+```bash
+docker compose up -d postgres
+python -m alembic upgrade head
+```
 
 Запустите backend:
 
@@ -100,6 +114,8 @@ uvicorn backend.app:app --reload --port 8000
 ```bash
 python bot/main.py
 ```
+
+В логах backend и бота при успешном подключении: `PostgreSQL: подключение установлено`.
 
 ### 5) Как поднять публичный URL для локального backend
 
@@ -144,6 +160,8 @@ curl http://127.0.0.1:8000/health
 curl "http://127.0.0.1:8000/api/public/config"
 ```
 
+При настроенной БД в `/health` ожидается `"db": true`.
+
 Проверьте пользовательский сценарий:
 1. Откройте чат с ботом и отправьте `/start`.
 2. Нажмите кнопку меню слева от поля ввода (`Открыть Mini App`).
@@ -158,8 +176,11 @@ curl "http://127.0.0.1:8000/api/public/config"
 ### Быстрый запуск (кратко)
 
 ```bash
+conda activate project-env
 pip install -r requirements.txt
 copy .env.example .env
+docker compose up -d postgres
+python -m alembic upgrade head
 uvicorn backend.app:app --reload --port 8000
 ngrok http 8000
 python bot/main.py
@@ -178,8 +199,14 @@ backend/
   app.py                 # FastAPI-приложение, API и раздача статики Mini App
   schemas.py             # Pydantic-схемы для запроса/ответа API прогноза
   telegram_webapp.py     # Валидация Telegram initData (hash/auth_date/user)
+  db/
+    engine.py            # Async SQLAlchemy engine
+    models.py            # ORM: users, forecast_requests
+    repository.py        # upsert_user, record_forecast_request
   services/
     open_meteo.py        # Клиент Open-Meteo (геокодинг + дневной прогноз)
+alembic/                 # Миграции схемы PostgreSQL
+docker-compose.yml       # Сервис postgres:16-alpine
 bot/
   main.py                # Telegram-бот (aiogram): команды, WebApp, set_my_commands
   forecast_args.py       # Парсинг /forecast и формат ответа (без токена при импорте)
@@ -190,30 +217,61 @@ miniapp/
   styles.css             # Стили интерфейса Mini App
 tests/
   test_api.py            # API-тесты с проверкой session cookie и auth-потока
+  test_repository.py     # Репозиторий БД на SQLite in-memory
+  test_db_integration.py # Опционально: PostgreSQL (TEST_DATABASE_URL)
   test_forecast_args.py  # Парсинг аргументов /forecast для бота
   test_telegram_webapp.py# Тесты валидации initData (hash/auth_date/user)
+  conftest.py            # Изоляция тестов от локального DATABASE_URL
 requirements.txt         # Python-зависимости
 .env.example             # Пример переменных окружения
 ```
 
-## Тесты
+## База данных
 
-Сейчас в проекте есть тесты:
-- `test_health_endpoint` проверяет доступность и контракт `/health`;
-- `test_geocode_endpoint_success` / `test_geocode_endpoint_empty` / `test_geocode_query_too_short` — `/api/geocode`;
-- `test_events_endpoint_accepts_known_event` / `test_events_endpoint_rejects_unknown_event` / `test_events_endpoint_rate_limit_429` — `POST /api/events`;
-- `test_forecast_endpoint_success` проверяет успешный ответ `/api/forecast` с мокнутым клиентом Open-Meteo;
-- `test_forecast_endpoint_validation_error` проверяет отказ без авторизации (`401`);
-- `test_forecast_args` — парсинг `/forecast` в `bot/forecast_args.py` (без `BOT_TOKEN`).
-- `test_telegram_webapp` — валидация `initData`: успешный hash, mismatch, просрочка, тип `user.id`.
+**СУБД:** PostgreSQL 16 в Docker (`docker-compose.yml`).
 
-Запуск всех тестов:
+**Таблицы:**
+- `users` — профиль Telegram (`telegram_user_id`, имя, username, `last_seen_at`, `last_seen_source`: `miniapp` | `bot`);
+- `forecast_requests` — попытки прогноза: город, дни, `status` (`success`, `validation_error`, `open_meteo_error`, `server_error`), опционально `http_status` и `error_detail`.
+
+**Когда пишется:**
+- Mini App: `POST /api/session` → `users`; `GET /api/forecast` → `forecast_requests` (все исходы);
+- Бот: команды с пользователем → `users`; `/forecast` с городом → `forecast_requests` (подсказка без города не пишется).
+
+**Не хранится:** `init_data`, токены, cookie, полный JSON прогноза, события `POST /api/events` (только логи), настройки формы из `localStorage`.
+
+**Миграции:** только через Alembic (`python -m alembic upgrade head`).
+
+**Проверка данных:**
 
 ```bash
+docker exec -it weather_forecast_postgres psql -U weather -d weather -c "SELECT telegram_user_id, username, last_seen_source FROM users;"
+docker exec -it weather_forecast_postgres psql -U weather -d weather -c "SELECT id, source, query_city, status, created_at FROM forecast_requests ORDER BY id DESC LIMIT 10;"
+```
+
+**Персональные данные:** хранятся Telegram ID, имя/username и история запросов городов для аналитики и улучшения сервиса; Open-Meteo получает только название города при запросе прогноза.
+
+## Тесты
+
+**Unit/API (без Docker):**
+
+```bash
+conda activate project-env
 python -m pytest
 ```
 
-Успешный результат:
-- `22 passed` (или больше, если добавлены новые тесты);
-- без ошибок импорта и падений endpoint'ов.
+Основные сценарии:
+- `test_api.py` — health, session, geocode, forecast, events; моки Open-Meteo и вызовов БД;
+- `test_repository.py` — upsert пользователя и записи `forecast_requests` на SQLite in-memory;
+- `test_forecast_args.py` — парсинг `/forecast`;
+- `test_telegram_webapp.py` — валидация `initData`.
+
+**Интеграция с PostgreSQL (опционально):**
+
+```bash
+set TEST_DATABASE_URL=postgresql+asyncpg://weather:PASSWORD@localhost:5432/weather
+python -m pytest -m integration
+```
+
+Успешный результат unit-набора: **25 passed** (без `-m integration`); без ошибок импорта.
 
