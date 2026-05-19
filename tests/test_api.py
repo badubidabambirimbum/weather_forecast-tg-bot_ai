@@ -71,14 +71,37 @@ def test_health_endpoint() -> None:
     assert response.json() == {"ok": True}
 
 
+def test_session_calls_upsert_user_safe(monkeypatch) -> None:
+    """POST /api/session вызывает upsert профиля (без реальной БД)."""
+    calls: list[tuple[int, str]] = []
+
+    async def fake_upsert(profile, *, source: str) -> None:
+        calls.append((profile.telegram_user_id, source))
+
+    monkeypatch.setattr(app_module, "upsert_user_safe", fake_upsert)
+    client = TestClient(app_module.app)
+    _auth_client(client, monkeypatch)
+    assert calls == [(123456789, "miniapp")]
+
+
 def test_forecast_endpoint_success(monkeypatch) -> None:
     """Проверяет успешную выдачу прогноза при валидных параметрах."""
     monkeypatch.setattr(app_module, "build_open_meteo_client", lambda: FakeOpenMeteoClient())
+    forecast_calls: list[dict] = []
+
+    async def fake_record(**kwargs) -> None:
+        forecast_calls.append(kwargs)
+
+    monkeypatch.setattr(app_module, "record_forecast_request_safe", fake_record)
     client = TestClient(app_module.app)
     _auth_client(client, monkeypatch)
     response = client.get("/api/forecast", params={"city": "Moscow", "days": 3})
 
     assert response.status_code == 200
+    assert len(forecast_calls) == 1
+    assert forecast_calls[0]["status"] == "success"
+    assert forecast_calls[0]["source"] == "miniapp"
+    assert forecast_calls[0]["telegram_user_id"] == 123456789
     payload = response.json()
     assert payload["city"] == "Москва"
     assert payload["days"] == 3
